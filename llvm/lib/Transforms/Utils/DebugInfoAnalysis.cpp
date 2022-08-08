@@ -38,7 +38,7 @@ PreservedAnalyses DebugInfoAnalysisPass::run(Function &F,
     }
   }
 
-  outs() << "Number of llvm.dbg.declare instructions: " << NumValue << "\n";
-  outs() << "Number of llvm.dbg.value instructions: " << NumDeclare << "\n";
+  outs() << "Number of llvm.dbg.value instructions:   " << NumValue << "\n";
+  outs() << "Number of llvm.dbg.declare instructions: " << NumDeclare << "\n";
   return PreservedAnalyses::all();
 }
