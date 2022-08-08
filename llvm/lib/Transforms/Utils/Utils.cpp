@@ -29,6 +29,7 @@ void llvm::initializeTransformUtils(PassRegistry &Registry) {
   initializeAssumeBuilderPassLegacyPassPass(Registry);
   initializeBreakCriticalEdgesPass(Registry);
   initializeCanonicalizeFreezeInLoopsPass(Registry);
+  initializeDebugInfoAnalysisLegacyPassPass(Registry);
   initializeInstNamerPass(Registry);
   initializeLCSSAWrapperPassPass(Registry);
   initializeLibCallsShrinkWrapLegacyPassPass(Registry);

@@ -145,6 +145,12 @@ Pass *createCanonicalizeFreezeInLoopsPass();
 // functions that are registered in @llvm.global_ctors and which contain a call
 // to `__cxa_atexit` to register their destructor functions.
 ModulePass *createLowerGlobalDtorsLegacyPass();
+
+//===----------------------------------------------------------------------===//
+//
+// DebugInfoAnalysis
+//
+FunctionPass *createDebugInfoAnalysisPass();
 } // namespace llvm
 
 #endif

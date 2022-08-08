@@ -95,6 +95,7 @@ namespace {
       (void) llvm::createDeadArgEliminationPass();
       (void) llvm::createDeadCodeEliminationPass();
       (void) llvm::createDeadStoreEliminationPass();
+      (void) llvm::createDebugInfoAnalysisPass();
       (void) llvm::createDependenceAnalysisWrapperPass();
       (void) llvm::createDomOnlyPrinterWrapperPassPass();
       (void) llvm::createDomPrinterWrapperPassPass();

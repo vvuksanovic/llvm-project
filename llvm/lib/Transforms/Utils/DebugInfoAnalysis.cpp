@@ -2,12 +2,14 @@
 
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/InitializePasses.h"
+#include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils.h"
 
 using namespace llvm;
 
-PreservedAnalyses DebugInfoAnalysisPass::run(Function &F,
-                                             FunctionAnalysisManager &AM) {
+static void runDebugInfoAnalysisPass(Function &F) {
   unsigned NumValue = 0;
   unsigned NumDeclare = 0;
 
@@ -40,5 +42,41 @@ PreservedAnalyses DebugInfoAnalysisPass::run(Function &F,
 
   outs() << "Number of llvm.dbg.value instructions:   " << NumValue << "\n";
   outs() << "Number of llvm.dbg.declare instructions: " << NumDeclare << "\n";
+}
+
+PreservedAnalyses DebugInfoAnalysisPass::run(Function &F,
+                                             FunctionAnalysisManager &AM) {
+  runDebugInfoAnalysisPass(F);
   return PreservedAnalyses::all();
+}
+
+namespace {
+
+struct DebugInfoAnalysisLegacyPass : public FunctionPass {
+  static char ID;
+
+  DebugInfoAnalysisLegacyPass() : FunctionPass(ID) {
+    initializeDebugInfoAnalysisLegacyPassPass(*PassRegistry::getPassRegistry());
+  }
+
+  bool runOnFunction(Function &F) override {
+    if (skipFunction(F))
+      return false;
+
+    runDebugInfoAnalysisPass(F);
+    return false;
+  }
+};
+
+} // end anonymous namespace
+
+char DebugInfoAnalysisLegacyPass::ID = 0;
+
+INITIALIZE_PASS_BEGIN(DebugInfoAnalysisLegacyPass, "debug-info-analysis",
+                      "Debug Info Analysis", false, false)
+INITIALIZE_PASS_END(DebugInfoAnalysisLegacyPass, "debug-info-analysis",
+                    "Debug Info Analysis", false, false)
+
+FunctionPass *llvm::createDebugInfoAnalysisPass() {
+  return new DebugInfoAnalysisLegacyPass();
 }

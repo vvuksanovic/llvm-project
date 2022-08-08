@@ -122,6 +122,7 @@ void initializeDFAJumpThreadingLegacyPassPass(PassRegistry &);
 void initializeDSELegacyPassPass(PassRegistry&);
 void initializeDataFlowSanitizerLegacyPassPass(PassRegistry &);
 void initializeDeadMachineInstructionElimPass(PassRegistry&);
+void initializeDebugInfoAnalysisLegacyPassPass(PassRegistry &);
 void initializeDebugifyMachineModulePass(PassRegistry &);
 void initializeDelinearizationPass(PassRegistry&);
 void initializeDemandedBitsWrapperPassPass(PassRegistry&);
