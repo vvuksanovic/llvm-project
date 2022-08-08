@@ -118,6 +118,7 @@
 #include "llvm/Transforms/Utils/AddDiscriminators.h"
 #include "llvm/Transforms/Utils/AssumeBundleBuilder.h"
 #include "llvm/Transforms/Utils/CanonicalizeAliases.h"
+#include "llvm/Transforms/Utils/DebugInfoAnalysis.h"
 #include "llvm/Transforms/Utils/InjectTLIMappings.h"
 #include "llvm/Transforms/Utils/LibCallsShrinkWrap.h"
 #include "llvm/Transforms/Utils/Mem2Reg.h"
@@ -384,6 +385,8 @@ PassBuilder::buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
   FPM.addPass(InstCombinePass());
   invokePeepholeEPCallbacks(FPM, Level);
 
+  FPM.addPass(DebugInfoAnalysisPass());
+
   return FPM;
 }
 
@@ -603,6 +606,8 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
       (PGOOpt->Action == PGOOptions::IRUse ||
        PGOOpt->Action == PGOOptions::SampleUse))
     FPM.addPass(ControlHeightReductionPass());
+
+  FPM.addPass(DebugInfoAnalysisPass());
 
   return FPM;
 }
