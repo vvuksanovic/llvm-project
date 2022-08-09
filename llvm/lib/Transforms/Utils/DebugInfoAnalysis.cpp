@@ -40,6 +40,7 @@ static void runDebugInfoAnalysisPass(Function &F) {
     }
   }
 
+  outs() << "Function " << F.getName() << ":\n";
   outs() << "Number of llvm.dbg.value instructions:   " << NumValue << "\n";
   outs() << "Number of llvm.dbg.declare instructions: " << NumDeclare << "\n";
 }
