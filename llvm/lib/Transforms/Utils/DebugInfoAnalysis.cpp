@@ -13,23 +13,9 @@ static void runDebugInfoAnalysisPass(Function &F) {
   unsigned NumValue = 0;
   unsigned NumDeclare = 0;
 
-  for (BasicBlock &BB : F) {
-    for (Instruction &I : BB) {
-      /*
-      // Impl 1
-      // Intrinsics support isa, cast and dyn_cast
-      if (dyn_cast<DbgValueInst>(&I)) {
-              ++NumValue;
-      } else if (dyn_cast<DbgDeclareInst>(&I)) {
-              ++NumDeclare;
-      }
-      */
-
-      // Impl 2
-      // Cast to IntrinsicInst and get ID
-      // Enum of IDs can be found in build/include/llvm/IR/IntrinsicEnums.inc
-      // the actual enum is created in llvm/include/llvm/IR/Intrinsics.h
-      auto *II = dyn_cast<IntrinsicInst>(&I);
+  for (const BasicBlock &BB : F) {
+    for (const Instruction &I : BB) {
+      const auto *II = dyn_cast<IntrinsicInst>(&I);
       if (!II)
         continue;
 
