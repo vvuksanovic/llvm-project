@@ -1,16 +1,28 @@
-; RUN: opt -S -passes=debug-info-analysis -disable-output < %s | FileCheck %s
-; RUN: opt -S -enable-new-pm=0 -debug-info-analysis -disable-output < %s | FileCheck %s
+; RUN: opt -S -passes=debug-info-analysis < %s 2>&1 | FileCheck %s
+; RUN: opt -S -enable-new-pm=0 -debug-info-analysis < %s 2>&1 | FileCheck %s
+
+; CHECK-LABEL: Function count_value:
+; CHECK-NEXT: Number of llvm.dbg.value instructions:   3
+; CHECK-NEXT: Number of llvm.dbg.declare instructions: 0
 
 target datalayout = "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
 
-define dso_local void @count_value() local_unnamed_addr !dbg !9 {
-  call void @llvm.dbg.value(metadata i32 2, metadata !14, metadata !DIExpression()), !dbg !17
-  call void @llvm.dbg.value(metadata i32 3, metadata !16, metadata !DIExpression()), !dbg !17
-  call void @llvm.dbg.value(metadata i32 3, metadata !14, metadata !DIExpression()), !dbg !17
-  ret void, !dbg !18
+; CHECK-LABEL: @count_value
+define dso_local void @count_value() local_unnamed_addr !dbg !8 {
+  ; CHECK-NOT: call void @llvm.dbg.value(metadata i32 2, metadata !13, metadata !DIExpression()), !dbg !16
+  ; CHECK: call void @llvm.dbg.declare(metadata i32 2, metadata !13, metadata !DIExpression()), !dbg !16
+  call void @llvm.dbg.value(metadata i32 2, metadata !13, metadata !DIExpression()), !dbg !16
+  ; CHECK-NOT: call void @llvm.dbg.value(metadata i32 3, metadata !15, metadata !DIExpression()), !dbg !16
+  ; CHECK: call void @llvm.dbg.declare(metadata i32 3, metadata !15, metadata !DIExpression()), !dbg !16
+  call void @llvm.dbg.value(metadata i32 3, metadata !15, metadata !DIExpression()), !dbg !16
+  ; CHECK-NOT: call void @llvm.dbg.value(metadata i32 3, metadata !13, metadata !DIExpression()), !dbg !16
+  ; CHECK: call void @llvm.dbg.declare(metadata i32 3, metadata !13, metadata !DIExpression()), !dbg !16
+  call void @llvm.dbg.value(metadata i32 3, metadata !13, metadata !DIExpression()), !dbg !16
+  ret void, !dbg !17
 }
 
+; CHECK declare void @llvm.dbg.declare(metadata, metadata, metadata)
 declare void @llvm.dbg.value(metadata, metadata, metadata)
 
 !llvm.dbg.cu = !{!0}
@@ -24,17 +36,15 @@ declare void @llvm.dbg.value(metadata, metadata, metadata)
 !5 = !{i32 7, !"PIC Level", i32 2}
 !6 = !{i32 7, !"PIE Level", i32 2}
 !7 = !{i32 7, !"uwtable", i32 2}
-!9 = distinct !DISubprogram(name: "count_value", scope: !10, file: !10, line: 1, type: !11, scopeLine: 1, flags: DIFlagAllCallsDescribed, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0, retainedNodes: !13)
-!10 = !DIFile(filename: "count-value.c", directory: "")
-!11 = !DISubroutineType(types: !12)
-!12 = !{null}
-!13 = !{!14, !16}
-!14 = !DILocalVariable(name: "X", scope: !9, file: !10, line: 2, type: !15)
-!15 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)
-!16 = !DILocalVariable(name: "Y", scope: !9, file: !10, line: 3, type: !15)
-!17 = !DILocation(line: 0, scope: !9)
-!18 = !DILocation(line: 5, column: 1, scope: !9)
+!8 = distinct !DISubprogram(name: "count_value", scope: !9, file: !9, line: 1, type: !10, scopeLine: 1, flags: DIFlagAllCallsDescribed, spFlags: DISPFlagDefinition | DISPFlagOptimized, unit: !0, retainedNodes: !12)
+!9 = !DIFile(filename: "count-value.c", directory: "")
+!10 = !DISubroutineType(types: !11)
+!11 = !{null}
+!12 = !{!13, !15}
+!13 = !DILocalVariable(name: "X", scope: !8, file: !9, line: 2, type: !14)
+!14 = !DIBasicType(name: "int", size: 32, encoding: DW_ATE_signed)
+!15 = !DILocalVariable(name: "Y", scope: !8, file: !9, line: 3, type: !14)
+!16 = !DILocation(line: 0, scope: !8)
+!17 = !DILocation(line: 5, column: 1, scope: !8)
 
-; CHECK: Function count_value:
-; CHECK-NEXT: Number of llvm.dbg.value instructions:   3
-; CHECK-NEXT: Number of llvm.dbg.declare instructions: 0
+

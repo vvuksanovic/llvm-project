@@ -1,5 +1,6 @@
 #include "llvm/Transforms/Utils/DebugInfoAnalysis.h"
 
+#include "llvm/IR/DIBuilder.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/InitializePasses.h"
@@ -9,26 +10,34 @@
 
 using namespace llvm;
 
-static void runDebugInfoAnalysisPass(Function &F) {
+static bool runDebugInfoAnalysisPass(Function &F) {
   unsigned NumValue = 0;
   unsigned NumDeclare = 0;
 
-  for (const BasicBlock &BB : F) {
-    for (const Instruction &I : BB) {
-      const auto *II = dyn_cast<IntrinsicInst>(&I);
-      if (!II)
-        continue;
+  DIBuilder DIB(*F.getParent(), false);
 
-      if (II->getIntrinsicID() == Intrinsic::dbg_value)
+  for (BasicBlock &BB : F) {
+    for (Instruction &I : make_early_inc_range(BB)) {
+      if (auto *DVI = dyn_cast<DbgValueInst>(&I)) {
         ++NumValue;
-      else if (II->getIntrinsicID() == Intrinsic::dbg_declare)
+        DIB.insertDeclare(DVI->getValue(0), DVI->getVariable(),
+                          DVI->getExpression(), DVI->getDebugLoc(), &I);
+        DVI->eraseFromParent();
+      } else if (auto *DDI = dyn_cast<DbgDeclareInst>(&I)) {
         ++NumDeclare;
+        DIB.insertDbgValueIntrinsic(DDI->getAddress(), DDI->getVariable(),
+                                    DDI->getExpression(), DDI->getDebugLoc(),
+                                    &I);
+        DDI->eraseFromParent();
+      }
     }
   }
 
   outs() << "Function " << F.getName() << ":\n";
   outs() << "Number of llvm.dbg.value instructions:   " << NumValue << "\n";
   outs() << "Number of llvm.dbg.declare instructions: " << NumDeclare << "\n";
+
+  return NumValue != 0 || NumDeclare != 0;
 }
 
 PreservedAnalyses DebugInfoAnalysisPass::run(Function &F,
@@ -50,8 +59,7 @@ struct DebugInfoAnalysisLegacyPass : public FunctionPass {
     if (skipFunction(F))
       return false;
 
-    runDebugInfoAnalysisPass(F);
-    return false;
+    return runDebugInfoAnalysisPass(F);
   }
 };
 
