@@ -377,6 +377,8 @@ private:
   void writeDIImportedEntity(const DIImportedEntity *N,
                              SmallVectorImpl<uint64_t> &Record,
                              unsigned Abbrev);
+  void writeDIOutlineId(const DIOutlineId *N, SmallVectorImpl<uint64_t> &Record,
+                        unsigned Abbrev);
   unsigned createNamedMetadataAbbrev();
   void writeNamedMetadata(SmallVectorImpl<uint64_t> &Record);
   unsigned createMetadataStringsAbbrev();
@@ -2233,6 +2235,14 @@ void ModuleBitcodeWriter::writeDIImportedEntity(
   Record.push_back(VE.getMetadataOrNullID(N->getElements().get()));
 
   Stream.EmitRecord(bitc::METADATA_IMPORTED_ENTITY, Record, Abbrev);
+  Record.clear();
+}
+
+void ModuleBitcodeWriter::writeDIOutlineId(const DIOutlineId *N,
+                                           SmallVectorImpl<uint64_t> &Record,
+                                           unsigned Abbrev) {
+  Record.push_back(N->isDistinct());
+  Stream.EmitRecord(bitc::METADATA_OUTLINE_ID, Record, Abbrev);
   Record.clear();
 }
 

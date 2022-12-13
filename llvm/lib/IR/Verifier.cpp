@@ -1275,6 +1275,11 @@ void Verifier::visitDIDerivedType(const DIDerivedType &N) {
   }
 }
 
+void Verifier::visitDIOutlineId(const DIOutlineId &N) {
+  CheckDI(!N.getNumOperands(), "DIOutlineId has no arguments", &N);
+  CheckDI(N.isDistinct(), "DIOutlineId must be distinct", &N);
+}
+
 /// Detect mutually exclusive flags.
 static bool hasConflictingReferenceFlags(unsigned Flags) {
   return ((Flags & DINode::FlagLValueReference) &&

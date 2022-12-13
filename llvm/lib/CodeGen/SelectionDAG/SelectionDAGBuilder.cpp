@@ -1352,6 +1352,15 @@ void SelectionDAGBuilder::visit(const Instruction &I) {
     }
   }
 
+  // Handle OutlineId metadata.
+  MDNode *OutlineId = I.getMetadata(LLVMContext::MD_outline_id);
+  if (OutlineId) {
+    auto It = NodeMap.find(&I);
+    if (It != NodeMap.end()) {
+      DAG.addOutlineId(It->second.getNode(), OutlineId);
+    }
+  }
+
   CurInst = nullptr;
 }
 
@@ -6561,6 +6570,18 @@ void SelectionDAGBuilder::visitIntrinsicCall(const CallInst &I,
                           SDNodeOrder, IsVariadic))
       addDanglingDebugInfo(Values, Variable, Expression, IsVariadic,
                            DI.getDebugLoc(), SDNodeOrder);
+    return;
+  }
+  case Intrinsic::dbg_outlined: {
+    const DbgOutlinedInst &DI = cast<DbgOutlinedInst>(I);
+    DIOutlineId *OutlineId = DI.getOutlineId();
+    assert(OutlineId && "Missing outline id");
+    DIOutlineId *CallId = DI.getCallId();
+    assert(CallId && "Missing call id");
+
+    SDDbgOutlined *SDO;
+    SDO = DAG.getDbgOutlined(OutlineId, CallId, dl, SDNodeOrder);
+    DAG.AddDbgOutlined(SDO);
     return;
   }
 

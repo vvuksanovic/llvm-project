@@ -955,6 +955,7 @@ MetadataLoader::MetadataLoaderImpl::lazyLoadModuleMetadataBlock() {
       case bitc::METADATA_IMPORTED_ENTITY:
       case bitc::METADATA_GLOBAL_VAR_EXPR:
       case bitc::METADATA_GENERIC_SUBRANGE:
+      case bitc::METADATA_OUTLINE_ID:
         // We don't expect to see any of these, if we see one, give up on
         // lazy-loading and fallback.
         MDStringRef.clear();
@@ -2277,6 +2278,18 @@ Error MetadataLoader::MetadataLoaderImpl::parseOneMetadata(
     }
 
     MetadataList.assignValue(DIArgList::get(Context, Elts), NextMetadataNo);
+    NextMetadataNo++;
+    break;
+  }
+  case bitc::METADATA_OUTLINE_ID: {
+    if (Record.size() != 1)
+      return error("Invalid DIOutlineID record.");
+
+    IsDistinct = Record[0] & 1;
+    if (!IsDistinct)
+      return error("Invalid DIOutlineID record. Must be distinct");
+
+    MetadataList.assignValue(DIOutlineId::getDistinct(Context), NextMetadataNo);
     NextMetadataNo++;
     break;
   }

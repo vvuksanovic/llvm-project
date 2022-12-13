@@ -87,6 +87,9 @@ protected:
   /// Mapping of inlined labels and DBG_LABEL machine instruction.
   DbgLabelInstrMap DbgLabels;
 
+  /// Mapping of outlined labels and DBG_OUTLINED machine instruction.
+  DbgOutlinedInstrMap DbgOutlines;
+
   /// Maps instruction with label emitted before instruction.
   /// FIXME: Make this private from DwarfDebug, we have the necessary accessors
   /// for it.
@@ -94,6 +97,9 @@ protected:
 
   /// Maps instruction with label emitted after instruction.
   DenseMap<const MachineInstr *, MCSymbol *> LabelsAfterInsn;
+
+  // Maps outline id with label emitted before linked outlined instruction.
+  DenseMap<const DIOutlineId *, MCSymbol *> OutlineLabelMap;
 
   /// Indentify instructions that are marking the beginning of or
   /// ending of a scope.

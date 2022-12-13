@@ -24,6 +24,7 @@
 ; CHECK-NEXT: DW_AT_frame_base  (DW_OP_reg31 WSP)
 ; CHECK-NEXT: DW_AT_linkage_name ("[[NAME:outlined_ir_func_[0-9]+]]")
 ; CHECK-NEXT: DW_AT_name  ("[[NAME]]")
+; CHECK-NEXT: DW_AT_LLVM_outlined  (true)
 ; CHECK-NEXT: DW_AT_artificial  (true)
 ; CHECK-NEXT: DW_AT_external  (true)
 
@@ -130,29 +131,41 @@ attributes #0 = { nounwind readnone speculatable willreturn }
 ; IRDEBUG-NEXT:    call void @llvm.dbg.value(metadata ptr [[B]], metadata [[META11:![0-9]+]], metadata !DIExpression()), !dbg [[DBG18]]
 ; IRDEBUG-NEXT:    [[C:%.*]] = alloca i32, align 4, !dbg [[DBG19:![0-9]+]]
 ; IRDEBUG-NEXT:    call void @llvm.dbg.value(metadata ptr [[C]], metadata [[META12:![0-9]+]], metadata !DIExpression()), !dbg [[DBG19]]
-; IRDEBUG-NEXT:    call void @outlined_ir_func_0(ptr [[A]], ptr [[B]], ptr [[C]]), !dbg [[DBG20:![0-9]+]]
-; IRDEBUG-NEXT:    ret void, !dbg [[DBG21:![0-9]+]]
+; IRDEBUG-NEXT:    call void @outlined_ir_func_0(ptr [[A]], ptr [[B]], ptr [[C]]), !dbg [[DBG20:![0-9]+]], !outline_id [[OUTLINE21:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE22:![0-9]+]], metadata [[OUTLINE21]]), !dbg [[DBG20:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE23:![0-9]+]], metadata [[OUTLINE21]]), !dbg [[DBG24:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE25:![0-9]+]], metadata [[OUTLINE21]]), !dbg [[DBG26:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE27:![0-9]+]], metadata [[OUTLINE21]]), !dbg [[DBG28:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE29:![0-9]+]], metadata [[OUTLINE21]]), !dbg [[DBG30:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE31:![0-9]+]], metadata [[OUTLINE21]]), !dbg [[DBG32:![0-9]+]]
+; IRDEBUG-NEXT:    ret void, !dbg [[DBG33:![0-9]+]]
 ;
 ;
 ; IRDEBUG-LABEL: @outline_debug2(
 ; IRDEBUG-NEXT:  entry:
-; IRDEBUG-NEXT:    [[A:%.*]] = alloca i32, align 4, !dbg [[DBG30:![0-9]+]]
-; IRDEBUG-NEXT:    call void @llvm.dbg.value(metadata ptr [[A]], metadata [[META24:![0-9]+]], metadata !DIExpression()), !dbg [[DBG30]]
-; IRDEBUG-NEXT:    [[B:%.*]] = alloca i32, align 4, !dbg [[DBG31:![0-9]+]]
-; IRDEBUG-NEXT:    call void @llvm.dbg.value(metadata ptr [[B]], metadata [[META25:![0-9]+]], metadata !DIExpression()), !dbg [[DBG31]]
-; IRDEBUG-NEXT:    [[C:%.*]] = alloca i32, align 4, !dbg [[DBG32:![0-9]+]]
-; IRDEBUG-NEXT:    call void @llvm.dbg.value(metadata ptr [[C]], metadata [[META26:![0-9]+]], metadata !DIExpression()), !dbg [[DBG32]]
-; IRDEBUG-NEXT:    call void @outlined_ir_func_0(ptr [[A]], ptr [[B]], ptr [[C]]), !dbg [[DBG33:![0-9]+]]
-; IRDEBUG-NEXT:    ret void, !dbg [[DBG34:![0-9]+]]
+; IRDEBUG-NEXT:    [[A:%.*]] = alloca i32, align 4, !dbg [[DBG42:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.value(metadata ptr [[A]], metadata [[META36:![0-9]+]], metadata !DIExpression()), !dbg [[DBG42]]
+; IRDEBUG-NEXT:    [[B:%.*]] = alloca i32, align 4, !dbg [[DBG43:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.value(metadata ptr [[B]], metadata [[META37:![0-9]+]], metadata !DIExpression()), !dbg [[DBG43]]
+; IRDEBUG-NEXT:    [[C:%.*]] = alloca i32, align 4, !dbg [[DBG44:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.value(metadata ptr [[C]], metadata [[META38:![0-9]+]], metadata !DIExpression()), !dbg [[DBG44]]
+; IRDEBUG-NEXT:    call void @outlined_ir_func_0(ptr [[A]], ptr [[B]], ptr [[C]]), !dbg [[DBG45:![0-9]+]], !outline_id [[OUTLINE46:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE22]], metadata [[OUTLINE46]]), !dbg [[DBG45:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE23]], metadata [[OUTLINE46]]), !dbg [[DBG47:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE25]], metadata [[OUTLINE46]]), !dbg [[DBG48:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE27]], metadata [[OUTLINE46]]), !dbg [[DBG49:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE29]], metadata [[OUTLINE46]]), !dbg [[DBG50:![0-9]+]]
+; IRDEBUG-NEXT:    call void @llvm.dbg.outlined(metadata [[OUTLINE31]], metadata [[OUTLINE46]]), !dbg [[DBG51:![0-9]+]]
+; IRDEBUG-NEXT:    ret void, !dbg [[DBG52:![0-9]+]]
 ;
 ;
 ; IRDEBUG: @outlined_ir_func_0(ptr [[TMP0:%.*]], ptr [[TMP1:%.*]], ptr  [[TMP2:%.*]])
 ; IRDEBUG:       entry_to_outline:
-; IRDEBUG-NEXT:    store i32 2, ptr [[TMP0]], align 4
-; IRDEBUG-NEXT:    store i32 3, ptr [[TMP1]], align 4
-; IRDEBUG-NEXT:    store i32 4, ptr [[TMP2]], align 4
-; IRDEBUG-NEXT:    [[AL:%.*]] = load i32, ptr [[TMP0]], align 4
-; IRDEBUG-NEXT:    [[BL:%.*]] = load i32, ptr [[TMP1]], align 4
-; IRDEBUG-NEXT:    [[CL:%.*]] = load i32, ptr [[TMP2]], align 4
+; IRDEBUG-NEXT:    store i32 2, ptr [[TMP0]], align 4, !outline_id [[OUTLINE22]]
+; IRDEBUG-NEXT:    store i32 3, ptr [[TMP1]], align 4, !outline_id [[OUTLINE23]]
+; IRDEBUG-NEXT:    store i32 4, ptr [[TMP2]], align 4, !outline_id [[OUTLINE25]]
+; IRDEBUG-NEXT:    [[AL:%.*]] = load i32, ptr [[TMP0]], align 4, !outline_id [[OUTLINE27]]
+; IRDEBUG-NEXT:    [[BL:%.*]] = load i32, ptr [[TMP1]], align 4, !outline_id [[OUTLINE29]]
+; IRDEBUG-NEXT:    [[CL:%.*]] = load i32, ptr [[TMP2]], align 4, !outline_id [[OUTLINE31]]
 ; IRDEBUG-NEXT:    br label [[ENTRY_AFTER_OUTLINE_EXITSTUB:%.*]]
 ;

@@ -803,7 +803,9 @@ MachineFunction *MachineOutliner::createOutlinedFunction(
         DB.createSubroutineType(
             DB.getOrCreateTypeArray(std::nullopt)), /* void type */
         0, /* Line 0 is reserved for compiler-generated code. */
-        DINode::DIFlags::FlagArtificial /* Compiler-generated code. */,
+        DINode::DIFlags::FlagArtificial | /* Compiler-generated outlined code.
+                                           */
+            DINode::DIFlags::FlagOutlined,
         /* Outlined code is optimized code by definition. */
         DISubprogram::SPFlagDefinition | DISubprogram::SPFlagOptimized);
 

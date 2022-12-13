@@ -119,6 +119,11 @@ void DwarfFile::addScopeLabel(LexicalScope *LS, DbgLabel *Label) {
   Labels.push_back(Label);
 }
 
+void DwarfFile::addCallOutline(const DIOutlineId *LS, DbgOutlined *Outlined) {
+  SmallVectorImpl<DbgOutlined *> &Outlines = CallOutlines[LS];
+  Outlines.push_back(Outlined);
+}
+
 std::pair<uint32_t, RangeSpanList *>
 DwarfFile::addRange(const DwarfCompileUnit &CU, SmallVector<RangeSpan, 2> R) {
   CURangeLists.push_back(

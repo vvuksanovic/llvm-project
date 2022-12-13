@@ -1822,6 +1822,8 @@ void AsmPrinter::emitFunctionBody() {
             emitInstruction(&MI);
         }
         break;
+      case TargetOpcode::DBG_OUTLINED:
+        break;
       case TargetOpcode::IMPLICIT_DEF:
         if (isVerbose()) emitImplicitDef(&MI);
         break;

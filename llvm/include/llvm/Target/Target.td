@@ -1302,6 +1302,13 @@ def DBG_LABEL : StandardPseudoInstruction {
   let hasSideEffects = false;
   let isMeta = true;
 }
+def DBG_OUTLINED : StandardPseudoInstruction {
+  let OutOperandList = (outs);
+  let InOperandList = (ins unknown:$outline, unknown:$call);
+  let AsmString = "DBG_OUTLINED";
+  let hasSideEffects = false;
+  let isMeta = true;
+}
 def REG_SEQUENCE : StandardPseudoInstruction {
   let OutOperandList = (outs unknown:$dst);
   let InOperandList = (ins unknown:$supersrc, variable_ops);

@@ -584,6 +584,7 @@ bool llvm::stripDebugInfo(Function &F) {
         I.setMetadata("heapallocsite", nullptr);
         // DIAssignID are debug info metadata primitives.
         I.setMetadata(LLVMContext::MD_DIAssignID, nullptr);
+        I.setMetadata(LLVMContext::MD_outline_id, nullptr);
       }
       I.dropDbgRecords();
     }

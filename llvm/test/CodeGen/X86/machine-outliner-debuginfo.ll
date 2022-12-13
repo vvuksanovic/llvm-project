@@ -1,4 +1,5 @@
 ; RUN: llc -enable-machine-outliner -mtriple=x86_64-apple-darwin < %s | FileCheck %s
+; RUN: llc -enable-machine-outliner -mtriple=x86_64-apple-darwin < %s | FileCheck --check-prefix=DWARF_FLAG %s
 
 @x = global i32 0, align 4, !dbg !0
 
@@ -39,6 +40,11 @@ define i32 @main() #0 !dbg !11 {
 ; CHECK-NEXT: movl  $3, -{{[0-9]+}}(%rbp)
 ; CHECK-NEXT: movl  $4, -{{[0-9]+}}(%rbp)
 ; CHECK-NEXT: retq
+
+; DWARF_FLAG: # DW_TAG_subprogram
+; DWARF_FLAG: # DW_AT_LLVM_outlined
+; DWARF_FLAG: Ldebug_info_start0:
+; DWARF_FLAG: # DW_AT_LLVM_outlined
 
 declare void @llvm.dbg.declare(metadata, metadata, metadata) #1
 

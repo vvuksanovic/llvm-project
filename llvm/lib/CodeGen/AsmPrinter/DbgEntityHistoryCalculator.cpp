@@ -285,6 +285,12 @@ void DbgLabelInstrMap::addInstr(InlinedEntity Label, const MachineInstr &MI) {
   LabelInstr[Label] = &MI;
 }
 
+void DbgOutlinedInstrMap::addInstr(InlinedEntity Outline,
+                                   const MachineInstr &MI) {
+  assert(MI.isDebugOutlined() && "not a DBG_OUTLINED");
+  OutlinedInstr[Outline].push_back(&MI);
+}
+
 namespace {
 
 // Maps physreg numbers to the variables they describe.
@@ -456,7 +462,8 @@ static void clobberRegisterUses(RegDescribedVarsMap &RegVars, unsigned RegNo,
 void llvm::calculateDbgEntityHistory(const MachineFunction *MF,
                                      const TargetRegisterInfo *TRI,
                                      DbgValueHistoryMap &DbgValues,
-                                     DbgLabelInstrMap &DbgLabels) {
+                                     DbgLabelInstrMap &DbgLabels,
+                                     DbgOutlinedInstrMap &DbgOutlines) {
   const TargetLowering *TLI = MF->getSubtarget().getTargetLowering();
   Register SP = TLI->getStackPointerRegisterToSaveRestore();
   Register FrameReg = TRI->getFrameRegister(*MF);
@@ -485,6 +492,13 @@ void llvm::calculateDbgEntityHistory(const MachineFunction *MF,
         // to query MCSymbol afterward.
         InlinedEntity L(RawLabel, MI.getDebugLoc()->getInlinedAt());
         DbgLabels.addInstr(L, MI);
+      } else if (MI.isDebugOutlined()) {
+        assert(MI.getNumOperands() == 2 && "Invalid DBG_OUTLINED instruction!");
+        const DIOutlineId *RawOutline = MI.getDebugOutlineCall();
+
+        DbgOutlinedInstrMap::InlinedEntity IE(RawOutline,
+                                              MI.getDebugLoc()->getInlinedAt());
+        DbgOutlines.addInstr(IE, MI);
       }
 
       // Meta Instructions have no output and do not change any values and so

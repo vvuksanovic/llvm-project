@@ -247,6 +247,9 @@ public:
   /// Construct a DIE for the given DbgLabel.
   DIE *constructLabelDIE(DbgLabel &DL, const LexicalScope &Scope);
 
+  /// Construct a DIE for the given DbgOutlined.
+  DIE *constructOutlinedDIE(DbgOutlined &DO, MCSymbol *Label);
+
   void createBaseTypeDIEs();
 
   /// Construct a DIE for a given scope.
@@ -294,6 +297,11 @@ public:
   /// Get or create a DIE for an imported entity.
   DIE *getOrCreateImportedEntityDIE(const DIImportedEntity *IE);
   DIE *constructImportedEntityDIE(const DIImportedEntity *IE);
+
+  /// Construct outline DIEs for the \p CallSiteDIE.
+  void createCallSiteOutlineEntries(
+      DIE &CallSiteDIE, const DIOutlineId *CallId,
+      const DenseMap<const DIOutlineId *, MCSymbol *> OutlineLabelMap);
 
   void finishSubprogramDefinition(const DISubprogram *SP);
   void finishEntityDefinition(const DbgEntity *Entity);
@@ -375,6 +383,9 @@ public:
                                              DIE &SPDie);
 
   void applyLabelAttributes(const DbgLabel &Label, DIE &LabelDie);
+
+  void applyOutlinedAttributes(const DbgOutlined &Outlined, DIE &OutlinedDie,
+                               MCSymbol *Label);
 
   /// getRanges - Get the list of ranges for this unit.
   const SmallVectorImpl<RangeSpan> &getRanges() const { return CURanges; }

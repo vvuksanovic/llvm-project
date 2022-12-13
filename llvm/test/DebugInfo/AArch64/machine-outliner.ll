@@ -24,6 +24,7 @@
 ; CHECK-NEXT: DW_AT_frame_base	(DW_OP_reg29 W29)
 ; CHECK-NEXT: DW_AT_MIPS_linkage_name	("[[NAME:OUTLINED_FUNCTION_[0-9]+]]")
 ; CHECK-NEXT: DW_AT_name	("[[NAME]]")
+; CHECK-NEXT: DW_AT_LLVM_outlined	(0x01)
 ; CHECK-NEXT: DW_AT_artificial	(0x01)
 ; CHECK-NEXT: DW_AT_external	(0x01)
 

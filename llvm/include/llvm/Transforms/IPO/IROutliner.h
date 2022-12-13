@@ -188,6 +188,16 @@ struct OutlinableRegion {
   /// \param [in] TTI - The TargetTransformInfo for the parent function.
   /// \returns the code size of the region
   InstructionCost getBenefit(TargetTransformInfo &TTI);
+
+  /// List of all extracted instruction not including CodeExtractor generated
+  /// ones
+  SmallVector<Instruction *, 4> OutlinedInstructions;
+
+  /// Generate dbg.outlined instructions for each outlined instruction.
+  ///
+  /// \param [in] M - Module this region belongs to.
+  /// \param [in] GeneratedFunction - Final, deduplicated, outlined function.
+  void generateDebugInstrs(Module &M, Function *GeneratedFunction);
 };
 
 /// This class is a pass that identifies similarity in a Module, extracts

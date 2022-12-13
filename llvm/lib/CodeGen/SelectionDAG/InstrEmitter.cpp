@@ -991,6 +991,19 @@ InstrEmitter::EmitDbgLabel(SDDbgLabel *SD) {
   return &*MIB;
 }
 
+MachineInstr *InstrEmitter::EmitDbgOutlined(SDDbgOutlined *SD) {
+  MDNode *OutlineId = SD->getOutlineId();
+  MDNode *CallId = SD->getCallId();
+  DebugLoc DL = SD->getDebugLoc();
+
+  const MCInstrDesc &II = TII->get(TargetOpcode::DBG_OUTLINED);
+  MachineInstrBuilder MIB = BuildMI(*MF, DL, II);
+  MIB.addMetadata(OutlineId);
+  MIB.addMetadata(CallId);
+
+  return &*MIB;
+}
+
 /// EmitMachineNode - Generate machine code for a target-specific node and
 /// needed dependencies.
 ///

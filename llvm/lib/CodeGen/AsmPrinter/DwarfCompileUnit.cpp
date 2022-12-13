@@ -743,6 +743,14 @@ DIE *DwarfCompileUnit::constructLexicalScopeDIE(LexicalScope *Scope) {
   return ScopeDIE;
 }
 
+DIE *DwarfCompileUnit::constructOutlinedDIE(DbgOutlined &DO, MCSymbol *Label) {
+  auto OutlinedDie = DIE::get(DIEValueAllocator, DO.getTag());
+  DO.setDIE(*OutlinedDie);
+  applyOutlinedAttributes(DO, *OutlinedDie, Label);
+
+  return OutlinedDie;
+}
+
 DIE *DwarfCompileUnit::constructVariableDIE(DbgVariable &DV, bool Abstract) {
   auto *VariableDie = DIE::get(DIEValueAllocator, DV.getTag());
   insertDIE(DV.getVariable(), VariableDie);
@@ -1149,6 +1157,16 @@ DIE *DwarfCompileUnit::createAndAddScopeChildren(LexicalScope *Scope,
   return ObjectPointer;
 }
 
+void DwarfCompileUnit::createCallSiteOutlineEntries(
+    DIE &CallSiteDIE, const DIOutlineId *CallId,
+    const DenseMap<const DIOutlineId *, MCSymbol *> OutlineLabelMap) {
+  for (DbgOutlined *DO : DU->getCallOutlines().lookup(CallId)) {
+    MCSymbol *Label = OutlineLabelMap.lookup(DO->getOutlineId());
+    if (Label && DO->getLocation()->getLine() != 0)
+      CallSiteDIE.addChild(constructOutlinedDIE(*DO, Label));
+  }
+}
+
 void DwarfCompileUnit::constructAbstractSubprogramScopeDIE(
     LexicalScope *Scope) {
   auto *SP = cast<DISubprogram>(Scope->getScopeNode());
@@ -1294,6 +1312,11 @@ DIE &DwarfCompileUnit::constructCallSiteEntryDIE(DIE &ScopeDIE,
     assert(PCAddr && "Missing return PC information for a call");
     addLabelAddress(CallSiteDIE,
                     getDwarf5OrGNUAttr(dwarf::DW_AT_call_return_pc), PCAddr);
+  }
+
+  // Add outlined flag.
+  if (CalleeSP && CalleeSP->isOutlined()) {
+    addFlag(CallSiteDIE, dwarf::DW_AT_LLVM_outlined);
   }
 
   return CallSiteDIE;
@@ -1634,6 +1657,18 @@ void DwarfCompileUnit::applyLabelAttributes(const DbgLabel &Label,
     addString(LabelDie, dwarf::DW_AT_name, Name);
   const auto *DILabel = Label.getLabel();
   addSourceLine(LabelDie, DILabel);
+}
+
+void DwarfCompileUnit::applyOutlinedAttributes(const DbgOutlined &Outlined,
+                                               DIE &OutlinedDie,
+                                               MCSymbol *Label) {
+  if (Outlined.getLocation()->getLine() != 0) {
+    addSourceLine(OutlinedDie, Outlined.getLocation()->getLine(),
+                  Outlined.getLocation()->getFile());
+    addUInt(OutlinedDie, dwarf::DW_AT_decl_column, std::nullopt,
+            Outlined.getLocation()->getColumn());
+  }
+  addLabelAddress(OutlinedDie, dwarf::DW_AT_low_pc, Label);
 }
 
 /// Add a Dwarf expression attribute data and value.

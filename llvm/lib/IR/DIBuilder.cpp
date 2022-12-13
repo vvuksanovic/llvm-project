@@ -1173,6 +1173,36 @@ DbgInstPtr DIBuilder::insertLabel(DILabel *LabelInfo, const DILocation *DL,
   return B.CreateCall(LabelFn, Args);
 }
 
+Instruction *DIBuilder::insertDbgOutlinedIntrinsic(Instruction *LinkedInstr,
+                                                   Instruction *CallInstr,
+                                                   const DILocation *DL,
+                                                   Instruction *InsertAfter) {
+  assert(CallInstr && "Expected CallInstr");
+  assert(CallInstr->getMetadata(LLVMContext::MD_outline_id) &&
+         "Expected outline id on call instruction");
+  assert(LinkedInstr && "Expected LinkedInstr");
+  assert(LinkedInstr->getMetadata(LLVMContext::MD_outline_id) &&
+         "Expected outline id on referenced instruction");
+  assert(DL && "Expected debug loc");
+  assert(DL->getScope()->getSubprogram() ==
+             CallInstr->getDebugLoc()->getInlinedAtScope()->getSubprogram() &&
+         "Expected matching subprograms");
+
+  Function *Fun = Intrinsic::getDeclaration(&M, Intrinsic::dbg_outlined);
+  Value *Args[] = {
+      MetadataAsValue::get(
+          LinkedInstr->getContext(),
+          LinkedInstr->getMetadata(LLVMContext::MD_outline_id)),
+      MetadataAsValue::get(LinkedInstr->getContext(),
+                           CallInstr->getMetadata(LLVMContext::MD_outline_id))};
+
+  IRBuilder<> B(DL->getContext());
+  B.SetCurrentDebugLocation(DL);
+  auto *DOI = B.CreateCall(Fun, Args);
+  DOI->insertAfter(InsertAfter);
+  return DOI;
+}
+
 void DIBuilder::replaceVTableHolder(DICompositeType *&T, DIType *VTableHolder) {
   {
     TypedTrackingMDRef<DICompositeType> N(T);

@@ -312,6 +312,36 @@ public:
   }
 };
 
+//===----------------------------------------------------------------------===//
+/// This class is used to track outline information.
+///
+/// Outlines are collected from \c DBG_OUTLINE instructions.
+class DbgOutlined {
+  const DIOutlineId *OutlineRef;
+  const DIOutlineId *CallId;
+  const DILocation *Loc;
+  DIE *TheDIE = nullptr;
+
+public:
+  DbgOutlined(const DIOutlineId *OutlineRef, const DIOutlineId *CallId,
+              const DILocation *Loc)
+      : OutlineRef(OutlineRef), CallId(CallId), Loc(Loc) {}
+
+  /// Accessors.
+  /// @{
+  const DIOutlineId *getOutlineId() const { return OutlineRef; }
+  const DIOutlineId *getCallId() const { return CallId; }
+  const DILocation *getLocation() const { return Loc; }
+
+  DIE *getDIE() const { return TheDIE; }
+  /// @}
+
+  /// Translate tag to proper Dwarf tag.
+  dwarf::Tag getTag() const { return dwarf::DW_TAG_LLVM_outlined_ref; }
+
+  void setDIE(DIE &D) { TheDIE = &D; }
+};
+
 /// Used for tracking debug info about call site parameters.
 class DbgCallSiteParam {
 private:
@@ -366,6 +396,9 @@ class DwarfDebug : public DebugHandlerBase {
 
   /// Collection of abstract variables/labels.
   SmallVector<std::unique_ptr<DbgEntity>, 64> ConcreteEntities;
+
+  // Collection of CallSiteDIEs of outliner generated functions.
+  SmallVector<std::pair<const DIOutlineId *, DIE &>> OutlineCallDIEs;
 
   /// Collection of DebugLocEntry. Stored in a linked list so that DIELocLists
   /// can refer to them in spite of insertions into this list.

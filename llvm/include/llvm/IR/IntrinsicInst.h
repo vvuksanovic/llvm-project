@@ -108,6 +108,7 @@ public:
     case Intrinsic::dbg_declare:
     case Intrinsic::dbg_value:
     case Intrinsic::dbg_label:
+    case Intrinsic::dbg_outlined:
     case Intrinsic::invariant_start:
     case Intrinsic::invariant_end:
     case Intrinsic::lifetime_start:
@@ -168,6 +169,7 @@ static inline bool isDbgInfoIntrinsic(Intrinsic::ID ID) {
   case Intrinsic::dbg_value:
   case Intrinsic::dbg_label:
   case Intrinsic::dbg_assign:
+  case Intrinsic::dbg_outlined:
     return true;
   default:
     return false;
@@ -520,6 +522,34 @@ public:
   /// @{
   static bool classof(const IntrinsicInst *I) {
     return I->getIntrinsicID() == Intrinsic::dbg_assign;
+  }
+  static bool classof(const Value *V) {
+    return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));
+  }
+  /// @}
+};
+
+/// This represents the llvm.dbg.outlined instruction.
+class DbgOutlinedInst : public DbgInfoIntrinsic {
+public:
+  DIOutlineId *getOutlineId() const {
+    return cast<DIOutlineId>(getRawOutlineId());
+  }
+
+  DIOutlineId *getCallId() const { return cast<DIOutlineId>(getRawCallId()); }
+
+  Metadata *getRawOutlineId() const {
+    return cast<MetadataAsValue>(getArgOperand(0))->getMetadata();
+  }
+
+  Metadata *getRawCallId() const {
+    return cast<MetadataAsValue>(getArgOperand(1))->getMetadata();
+  }
+
+  /// \name Casting methods
+  /// @{
+  static bool classof(const IntrinsicInst *I) {
+    return I->getIntrinsicID() == Intrinsic::dbg_outlined;
   }
   static bool classof(const Value *V) {
     return isa<IntrinsicInst>(V) && classof(cast<IntrinsicInst>(V));

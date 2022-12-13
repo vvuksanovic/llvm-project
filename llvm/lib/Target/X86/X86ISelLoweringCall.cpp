@@ -2544,10 +2544,14 @@ X86TargetLowering::LowerCall(TargetLowering::CallLoweringInfo &CLI,
   DAG.addNoMergeSiteInfo(Chain.getNode(), CLI.NoMerge);
   DAG.addCallSiteInfo(Chain.getNode(), std::move(CSInfo));
 
-  // Save heapallocsite metadata.
-  if (CLI.CB)
+  // Save heapallocsite and outlineid metadata.
+  if (CLI.CB) {
     if (MDNode *HeapAlloc = CLI.CB->getMetadata("heapallocsite"))
       DAG.addHeapAllocSite(Chain.getNode(), HeapAlloc);
+
+    if (MDNode *OutlineId = CLI.CB->getMetadata(LLVMContext::MD_outline_id))
+      DAG.addOutlineId(Chain.getNode(), OutlineId);
+  }
 
   // Create the CALLSEQ_END node.
   unsigned NumBytesForCalleeToPop = 0; // Callee pops nothing.

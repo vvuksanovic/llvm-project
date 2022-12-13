@@ -5828,6 +5828,24 @@ bool LLParser::parseDIImportedEntity(MDNode *&Result, bool IsDistinct) {
 #undef REQUIRE_FIELD
 #undef DECLARE_FIELD
 
+/// parseDIOutlineId:
+///   ::= distinct !DIOutlineId()
+bool LLParser::parseDIOutlineId(MDNode *&Result, bool IsDistinct) {
+  if (!IsDistinct)
+    return Lex.Error("missing 'distinct', required for !DIOutlineId()");
+
+  Lex.Lex();
+
+  // Now eat the parens.
+  if (parseToken(lltok::lparen, "expected '(' here"))
+    return true;
+  if (parseToken(lltok::rparen, "expected ')' here"))
+    return true;
+
+  Result = DIOutlineId::getDistinct(Context);
+  return false;
+}
+
 /// parseMetadataAsValue
 ///  ::= metadata i32 %local
 ///  ::= metadata i32 @global

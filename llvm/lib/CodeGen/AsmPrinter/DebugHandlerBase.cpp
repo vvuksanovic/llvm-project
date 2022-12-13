@@ -258,6 +258,17 @@ void DebugHandlerBase::beginFunction(const MachineFunction *MF) {
     return;
   }
 
+  // Ensure there is a symbol before every instruction with OutlineId metadata
+  // but only if the function is marked as outlined.
+  if (MF->getFunction().getSubprogram()->isOutlined()) {
+    for (const auto &BB : *MF) {
+      for (const auto &I : BB) {
+        if (MDNode *MD = I.getOutlineId())
+          requestLabelBeforeInsn(&I);
+      }
+    }
+  }
+
   // Grab the lexical scopes for the function, if we don't have any of those
   // then we're not going to be able to do anything.
   LScopes.initialize(*MF);
@@ -272,8 +283,9 @@ void DebugHandlerBase::beginFunction(const MachineFunction *MF) {
   // Calculate history for local variables.
   assert(DbgValues.empty() && "DbgValues map wasn't cleaned!");
   assert(DbgLabels.empty() && "DbgLabels map wasn't cleaned!");
+  assert(DbgOutlines.empty() && "DbgOutlines map wasn't cleaned!");
   calculateDbgEntityHistory(MF, Asm->MF->getSubtarget().getRegisterInfo(),
-                            DbgValues, DbgLabels);
+                            DbgValues, DbgLabels, DbgOutlines);
   InstOrdering.initialize(*MF);
   if (TrimVarLocs)
     DbgValues.trimLocationRanges(*MF, LScopes, InstOrdering);
@@ -414,6 +426,7 @@ void DebugHandlerBase::endFunction(const MachineFunction *MF) {
     endFunctionImpl(MF);
   DbgValues.clear();
   DbgLabels.clear();
+  DbgOutlines.clear();
   LabelsBeforeInsn.clear();
   LabelsAfterInsn.clear();
   InstOrdering.clear();

@@ -160,20 +160,22 @@ private:
                              MCSymbol *PreInstrSymbol = nullptr,
                              MCSymbol *PostInstrSymbol = nullptr,
                              MDNode *HeapAllocMarker = nullptr,
-                             MDNode *PCSections = nullptr,
-                             uint32_t CFIType = 0) {
+                             MDNode *PCSections = nullptr, uint32_t CFIType = 0,
+                             MDNode *OutlineId = nullptr) {
       bool HasPreInstrSymbol = PreInstrSymbol != nullptr;
       bool HasPostInstrSymbol = PostInstrSymbol != nullptr;
       bool HasHeapAllocMarker = HeapAllocMarker != nullptr;
       bool HasCFIType = CFIType != 0;
       bool HasPCSections = PCSections != nullptr;
+      bool HasOutlineId = OutlineId != nullptr;
       auto *Result = new (Allocator.Allocate(
           totalSizeToAlloc<MachineMemOperand *, MCSymbol *, MDNode *, uint32_t>(
               MMOs.size(), HasPreInstrSymbol + HasPostInstrSymbol,
-              HasHeapAllocMarker + HasPCSections, HasCFIType),
+              HasHeapAllocMarker + HasPCSections + HasOutlineId, HasCFIType),
           alignof(ExtraInfo)))
           ExtraInfo(MMOs.size(), HasPreInstrSymbol, HasPostInstrSymbol,
-                    HasHeapAllocMarker, HasPCSections, HasCFIType);
+                    HasHeapAllocMarker, HasPCSections, HasCFIType,
+                    HasOutlineId);
 
       // Copy the actual data into the trailing objects.
       std::copy(MMOs.begin(), MMOs.end(),
@@ -191,6 +193,9 @@ private:
             PCSections;
       if (HasCFIType)
         Result->getTrailingObjects<uint32_t>()[0] = CFIType;
+      if (HasOutlineId)
+        Result->getTrailingObjects<MDNode *>()[HasHeapAllocMarker +
+                                               HasPCSections] = OutlineId;
 
       return Result;
     }
@@ -223,6 +228,12 @@ private:
       return HasCFIType ? getTrailingObjects<uint32_t>()[0] : 0;
     }
 
+    MDNode *getOutlineId() const {
+      return HasOutlineId ? getTrailingObjects<MDNode *>()[HasHeapAllocMarker +
+                                                           HasPCSections]
+                          : nullptr;
+    }
+
   private:
     friend TrailingObjects;
 
@@ -237,6 +248,7 @@ private:
     const bool HasHeapAllocMarker;
     const bool HasPCSections;
     const bool HasCFIType;
+    const bool HasOutlineId;
 
     // Implement the `TrailingObjects` internal API.
     size_t numTrailingObjects(OverloadToken<MachineMemOperand *>) const {
@@ -255,11 +267,12 @@ private:
     // Just a boring constructor to allow us to initialize the sizes. Always use
     // the `create` routine above.
     ExtraInfo(int NumMMOs, bool HasPreInstrSymbol, bool HasPostInstrSymbol,
-              bool HasHeapAllocMarker, bool HasPCSections, bool HasCFIType)
+              bool HasHeapAllocMarker, bool HasPCSections, bool HasCFIType,
+              bool HasOutlineId)
         : NumMMOs(NumMMOs), HasPreInstrSymbol(HasPreInstrSymbol),
           HasPostInstrSymbol(HasPostInstrSymbol),
           HasHeapAllocMarker(HasHeapAllocMarker), HasPCSections(HasPCSections),
-          HasCFIType(HasCFIType) {}
+          HasCFIType(HasCFIType), HasOutlineId(HasOutlineId) {}
   };
 
   /// Enumeration of the kinds of inline extra info available. It is important
@@ -507,6 +520,14 @@ public:
   /// Return the debug label referenced by
   /// this DBG_LABEL instruction.
   const DILabel *getDebugLabel() const;
+
+  /// Return the debug outline ref id referenced by
+  /// this DBG_OUTLINED instruction.
+  const DIOutlineId *getDebugOutlineRef() const;
+
+  /// Return the debug outline call id referenced by
+  /// this DBG_OUTLINED instruction.
+  const DIOutlineId *getDebugOutlineCall() const;
 
   /// Fetch the instruction number of this MachineInstr. If it does not have
   /// one already, a new and unique number will be assigned.
@@ -846,6 +867,16 @@ public:
       return EI->getCFIType();
 
     return 0;
+  }
+
+  /// Helper to extract an outline id if one has been added.
+  MDNode *getOutlineId() const {
+    if (!Info)
+      return nullptr;
+    if (ExtraInfo *EI = Info.get<EIIK_OutOfLine>())
+      return EI->getOutlineId();
+
+    return nullptr;
   }
 
   /// API for querying MachineInstr properties. They are the same as MCInstrDesc
@@ -1320,8 +1351,12 @@ public:
   bool isDebugRef() const { return getOpcode() == TargetOpcode::DBG_INSTR_REF; }
   bool isDebugValueLike() const { return isDebugValue() || isDebugRef(); }
   bool isDebugPHI() const { return getOpcode() == TargetOpcode::DBG_PHI; }
+  bool isDebugOutlined() const {
+    return getOpcode() == TargetOpcode::DBG_OUTLINED;
+  }
   bool isDebugInstr() const {
-    return isDebugValue() || isDebugLabel() || isDebugRef() || isDebugPHI();
+    return isDebugValue() || isDebugLabel() || isDebugRef() || isDebugPHI() ||
+           isDebugOutlined();
   }
   bool isDebugOrPseudoInstr() const {
     return isDebugInstr() || isPseudoProbe();
@@ -1412,7 +1447,7 @@ public:
   /// Return true is the instruction is an identity copy.
   bool isIdentityCopy() const {
     return isCopy() && getOperand(0).getReg() == getOperand(1).getReg() &&
-      getOperand(0).getSubReg() == getOperand(1).getSubReg();
+           getOperand(0).getSubReg() == getOperand(1).getSubReg();
   }
 
   /// Return true if this is a transient instruction that is either very likely
@@ -1905,6 +1940,10 @@ public:
   /// Set the CFI type for the instruction.
   void setCFIType(MachineFunction &MF, uint32_t Type);
 
+  /// Set the outline id on this instruction which can be referenced by a
+  /// DBG_OUTLINED instruction to link them.
+  void setOutlineId(MachineFunction &MF, MDNode *MD);
+
   /// Return the MIFlags which represent both MachineInstrs. This
   /// should be used when merging two MachineInstrs into one. This routine does
   /// not modify the MIFlags of this MachineInstr.
@@ -2014,7 +2053,7 @@ private:
   void setExtraInfo(MachineFunction &MF, ArrayRef<MachineMemOperand *> MMOs,
                     MCSymbol *PreInstrSymbol, MCSymbol *PostInstrSymbol,
                     MDNode *HeapAllocMarker, MDNode *PCSections,
-                    uint32_t CFIType);
+                    uint32_t CFIType, MDNode *OutlineId);
 };
 
 /// Special DenseMapInfo traits to compare MachineInstr* by *value* of the

@@ -898,6 +898,10 @@ EmitSchedule(MachineBasicBlock::iterator &InsertPos) {
     if (MDNode *MD = DAG->getPCSections(Node))
       MI->setPCSections(MF, MD);
 
+    if (MDNode *MD = DAG->getOutlineId(Node)) {
+      MI->setOutlineId(MF, MD);
+    }
+
     return MI;
   };
 
@@ -1048,6 +1052,39 @@ EmitSchedule(MachineBasicBlock::iterator &InsertPos) {
         }
       }
       if (DLI == DLE)
+        break;
+
+      LastOrder = Order;
+    }
+
+    SDDbgInfo::DbgOutlinedIterator DOI = DAG->DbgOutlinedBegin();
+    SDDbgInfo::DbgOutlinedIterator DOE = DAG->DbgOutlinedEnd();
+    // Now emit the rest according to source order.
+    LastOrder = 0;
+    for (const auto &InstrOrder : Orders) {
+      unsigned Order = InstrOrder.first;
+      MachineInstr *MI = InstrOrder.second;
+      if (!MI)
+        continue;
+
+      // Insert all SDDbgOutlined's whose order(s) are before "Order".
+      for (; DOI != DOE && (*DOI)->getOrder() >= LastOrder &&
+             (*DOI)->getOrder() < Order;
+           ++DOI) {
+        MachineInstr *DbgMI = Emitter.EmitDbgOutlined(*DOI);
+        if (DbgMI) {
+          if (!LastOrder)
+            // Insert to start of the BB (after PHIs).
+            BB->insert(BBBegin, DbgMI);
+          else {
+            // Insert at the instruction, which may be in a different
+            // block, if the block was split by a custom inserter.
+            MachineBasicBlock::iterator Pos = MI;
+            MI->getParent()->insert(Pos, DbgMI);
+          }
+        }
+      }
+      if (DOI == DOE)
         break;
 
       LastOrder = Order;

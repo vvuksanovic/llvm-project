@@ -684,7 +684,9 @@ Function *IROutliner::createFunction(Module &M, OutlinableGroup &Group,
         DB.createSubroutineType(
             DB.getOrCreateTypeArray(std::nullopt)), /* void type */
         0, /* Line 0 is reserved for compiler-generated code. */
-        DINode::DIFlags::FlagArtificial /* Compiler-generated code. */,
+        DINode::DIFlags::FlagArtificial | /* Compiler-generated outlined code.
+                                           */
+            DINode::DIFlags::FlagOutlined,
         /* Outlined code is optimized code by definition. */
         DISubprogram::SPFlagDefinition | DISubprogram::SPFlagOptimized);
 
@@ -730,8 +732,13 @@ static void moveFunctionData(Function &Old, Function &New,
       // We must handle the scoping of called functions differently than
       // other outlined instructions.
       if (!isa<CallInst>(&Val)) {
-        // Remove the debug information for outlined functions.
-        Val.setDebugLoc(DebugLoc());
+        // Fix the debug location information for extracted functions.
+        if (Val.getDebugLoc())
+          Val.setDebugLoc(DebugLoc(DILocation::get(
+              New.getContext(), Val.getDebugLoc()->getLine(),
+              Val.getDebugLoc()->getColumn(), New.getSubprogram(), nullptr)));
+        else
+          Val.setDebugLoc(DebugLoc());
 
         // Loop info metadata may contain line locations. Update them to have no
         // value in the new subprogram since the outlined code could be from
@@ -758,7 +765,12 @@ static void moveFunctionData(Function &Old, Function &New,
 
       // Edit the scope of called functions inside of outlined functions.
       if (DISubprogram *SP = New.getSubprogram()) {
-        DILocation *DI = DILocation::get(New.getContext(), 0, 0, SP);
+        DILocation *DI;
+        if (Val.getDebugLoc())
+          DI = DILocation::get(New.getContext(), Val.getDebugLoc()->getLine(),
+                               Val.getDebugLoc()->getColumn(), SP);
+        else
+          DI = DILocation::get(New.getContext(), 0, 0, SP);
         Val.setDebugLoc(DI);
       }
     }
@@ -1420,6 +1432,52 @@ void IROutliner::findAddInputsOutputs(Module &M, OutlinableRegion &Region,
   findExtractedOutputToOverallOutputMapping(M, Region, Outputs);
 }
 
+void OutlinableRegion::generateDebugInstrs(Module &M,
+                                           Function *GeneratedFunction) {
+  assert(ExtractedFunction &&
+         "Generation of dbg instrs must be done after extractSection");
+  assert(GeneratedFunction &&
+         "Generation of dbg instrs must be done after fillOverallFunction");
+
+  if (!GeneratedFunction->getSubprogram())
+    return;
+
+  // If the call instruction has no DebugLoc, we can't make the scope for
+  // outlined instructions.
+  if (!Call->getDebugLoc())
+    return;
+
+  DIBuilder DIB(M, false);
+  Instruction *Current = Call;
+
+  size_t i = 0;
+  for (BasicBlock &BB : *GeneratedFunction) {
+    for (Instruction &I : BB) {
+      if (!I.hasMetadata(LLVMContext::MD_outline_id))
+        continue;
+      assert(i < OutlinedInstructions.size() &&
+             "Number of instructions in outlined and generated functions does "
+             "not match");
+      Instruction *OutlinedInstr = OutlinedInstructions[i];
+      if (OutlinedInstr->getDebugLoc())
+        Current = DIB.insertDbgOutlinedIntrinsic(
+            &I, Call,
+            DebugLoc(DILocation::get(
+                Call->getContext(), OutlinedInstr->getDebugLoc()->getLine(),
+                OutlinedInstr->getDebugLoc()->getColumn(),
+                Call->getDebugLoc()->getInlinedAtScope(), nullptr)),
+            Current);
+      i++;
+    }
+  }
+  assert(i == OutlinedInstructions.size() &&
+         "Number of instructions in outlined and generated functions does not "
+         "match");
+
+  DIB.finalize();
+  OutlinedInstructions.clear();
+}
+
 /// Replace the extracted function in the Region with a call to the overall
 /// function constructed from the deduplicated similar regions, replacing and
 /// remapping the values passed to the extracted function as arguments to the
@@ -1447,6 +1505,10 @@ CallInst *replaceCalledFunction(Module &M, OutlinableRegion &Region) {
     LLVM_DEBUG(dbgs() << "Replace call to " << *Call << " with call to "
                       << *AggFunc << " with same number of arguments\n");
     Call->setCalledFunction(AggFunc);
+
+    // Generate dbg.outlined instructions.
+    Region.generateDebugInstrs(M, AggFunc);
+
     return Call;
   }
 
@@ -1515,6 +1577,9 @@ CallInst *replaceCalledFunction(Module &M, OutlinableRegion &Region) {
 
   // Transfer any debug information.
   Call->setDebugLoc(Region.Call->getDebugLoc());
+  // Transfer OutlineId.
+  Call->copyMetadata(*OldCall, LLVMContext::MD_outline_id);
+
   // Since our output may determine which branch we go to, we make sure to
   // propogate this new call value through the module.
   OldCall->replaceAllUsesWith(Call);
@@ -1522,6 +1587,9 @@ CallInst *replaceCalledFunction(Module &M, OutlinableRegion &Region) {
   // Remove the old instruction.
   OldCall->eraseFromParent();
   Region.Call = Call;
+
+  // Generate dbg.outlined instructions.
+  Region.generateDebugInstrs(M, AggFunc);
 
   // Make sure that the argument in the new function has the SwiftError
   // argument.
@@ -2257,6 +2325,16 @@ static void fillOverallFunction(
   moveFunctionData(*CurrentOS->ExtractedFunction,
                    *CurrentGroup.OutlinedFunction, CurrentGroup.EndBBs);
 
+  // Add DIOutlinedIds.
+  if (CurrentGroup.OutlinedFunction->getSubprogram())
+    for (Instruction *I : CurrentOS->OutlinedInstructions)
+      if (!I->hasMetadata(
+              LLVMContext::MD_outline_id)) // Don't replace outline id if it
+                                           // already has one.
+        I->setMetadata(LLVMContext::MD_outline_id,
+                       DIOutlineId::getDistinct(
+                           CurrentOS->ExtractedFunction->getContext()));
+
   // Transfer the attributes from the function to the new function.
   for (Attribute A : CurrentOS->ExtractedFunction->getAttributes().getFnAttrs())
     CurrentGroup.OutlinedFunction->addFnAttr(A);
@@ -2286,6 +2364,22 @@ static void fillOverallFunction(
 
   // Replace the call to the extracted function with the outlined function.
   CurrentOS->Call = replaceCalledFunction(M, *CurrentOS);
+
+  // Remove debug locations from outlined function.
+  if (CurrentGroup.OutlinedFunction->getSubprogram()) {
+    for (BasicBlock &BB : *CurrentGroup.OutlinedFunction) {
+      for (Instruction &I : BB) {
+        // Inlinable function call in a function with debug info must have a dbg
+        // location.
+        if (isa<CallInst>(I))
+          I.setDebugLoc(DebugLoc(DILocation::get(
+              CurrentGroup.OutlinedFunction->getSubprogram()->getContext(), 0,
+              0, CurrentGroup.OutlinedFunction->getSubprogram())));
+        else
+          I.setDebugLoc(DebugLoc());
+      }
+    }
+  }
 
   // We only delete the extracted functions at the end since we may need to
   // reference instructions contained in them for mapping purposes.
@@ -2726,6 +2820,10 @@ bool IROutliner::extractSection(OutlinableRegion &Region) {
     return false;
   }
 
+  for (const auto &ID : *Region.Candidate) {
+    Region.OutlinedInstructions.push_back(ID.Inst);
+  }
+
   // Get the block containing the called branch, and reassign the blocks as
   // necessary.  If the original block still exists, it is because we ended on
   // a branch instruction, and so we move the contents into the block before
@@ -2779,6 +2877,15 @@ bool IROutliner::extractSection(OutlinableRegion &Region) {
         Region.Call = CI;
     } else if (LoadInst *LI = dyn_cast<LoadInst>(&I))
       updateOutputMapping(Region, Outputs.getArrayRef(), LI);
+
+  // Add OutlineId to the call instruction.
+  if (!Region.Call->hasMetadata(
+          LLVMContext::MD_outline_id)) // Don't replace outline id if it already
+                                       // has one.
+    Region.Call->setMetadata(
+        LLVMContext::MD_outline_id,
+        DIOutlineId::getDistinct(Region.Call->getContext()));
+
   Region.reattachCandidate();
   return true;
 }

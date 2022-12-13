@@ -340,6 +340,37 @@ public:
   }
 };
 
+/// Outline ID.
+///
+/// Used to identify outlined instructions and calls to outlined functions
+class DIOutlineId : public MDNode {
+  friend class LLVMContextImpl;
+  friend class MDNode;
+
+  DIOutlineId(LLVMContext &C, StorageType Storage)
+      : MDNode(C, DIOutlineIdKind, Storage, std::nullopt){};
+
+  ~DIOutlineId() = default;
+
+  static DIOutlineId *getImpl(LLVMContext &Context, StorageType Storage,
+                              bool ShouldCreate = true);
+
+  TempDIOutlineId cloneImpl() const { return getTemporary(getContext()); }
+
+public:
+  // This node has no operands to replace.
+  void replaceOperandWith(unsigned I, Metadata *New) = delete;
+  static DIOutlineId *getDistinct(LLVMContext &Context) {
+    return getImpl(Context, Distinct);
+  }
+  static TempDIOutlineId getTemporary(LLVMContext &Context) {
+    return TempDIOutlineId(getImpl(Context, Temporary));
+  }
+  static bool classof(const Metadata *MD) {
+    return MD->getMetadataID() == DIOutlineIdKind;
+  }
+};
+
 /// Array subrange.
 ///
 /// TODO: Merge into node for DW_TAG_array_type, which should have a custom
@@ -1805,6 +1836,7 @@ public:
   bool isOptimized() const { return getSPFlags() & SPFlagOptimized; }
   bool isMainSubprogram() const { return getSPFlags() & SPFlagMainSubprogram; }
 
+  bool isOutlined() const { return getFlags() & FlagOutlined; }
   bool isArtificial() const { return getFlags() & FlagArtificial; }
   bool isPrivate() const {
     return (getFlags() & FlagAccessibility) == FlagPrivate;

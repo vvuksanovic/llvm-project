@@ -1318,6 +1318,9 @@ void DwarfUnit::applySubprogramAttributes(const DISubprogram *SP, DIE &SPDie,
 
   addThrownTypes(SPDie, SP->getThrownTypes());
 
+  if (SP->isOutlined())
+    addFlag(SPDie, dwarf::DW_AT_LLVM_outlined);
+
   if (SP->isArtificial())
     addFlag(SPDie, dwarf::DW_AT_artificial);
 

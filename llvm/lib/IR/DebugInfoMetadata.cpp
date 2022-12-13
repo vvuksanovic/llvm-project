@@ -1362,6 +1362,11 @@ DILabel *DILabel::getImpl(LLVMContext &Context, Metadata *Scope, MDString *Name,
   DEFINE_GETIMPL_STORE(DILabel, (Line), Ops);
 }
 
+DIOutlineId *DIOutlineId::getImpl(LLVMContext &Context, StorageType Storage,
+                                  bool ShouldCreate) {
+  return new (0u, Storage) DIOutlineId(Context, Storage);
+}
+
 DIExpression *DIExpression::getImpl(LLVMContext &Context,
                                     ArrayRef<uint64_t> Elements,
                                     StorageType Storage, bool ShouldCreate) {

@@ -860,6 +860,13 @@ void MIPrinter::print(const MachineInstr &MI) {
     OS << " cfi-type " << CFIType;
     NeedComma = true;
   }
+  if (MDNode *OutlineId = MI.getOutlineId()) {
+    if (NeedComma)
+      OS << ',';
+    OS << " outline-id ";
+    OutlineId->printAsOperand(OS, MST);
+    NeedComma = true;
+  }
 
   if (auto Num = MI.peekDebugInstrNum()) {
     if (NeedComma)

@@ -25,8 +25,10 @@ class AsmPrinter;
 class DbgEntity;
 class DbgVariable;
 class DbgLabel;
+class DbgOutlined;
 class DINode;
 class DILocalScope;
+class DIOutlineId;
 class DwarfCompileUnit;
 class DwarfUnit;
 class LexicalScope;
@@ -86,6 +88,10 @@ class DwarfFile {
   /// Collection of DbgLabels of each lexical scope.
   using LabelList = SmallVector<DbgLabel *, 4>;
   DenseMap<LexicalScope *, LabelList> ScopeLabels;
+
+  /// Collection of DbgOutlines of each lexical scope.
+  using OutlinedList = SmallVector<DbgOutlined *, 4>;
+  DenseMap<const DIOutlineId *, OutlinedList> CallOutlines;
 
   // Collection of abstract subprogram DIEs.
   DenseMap<const DILocalScope *, DIE *> AbstractLocalScopeDIEs;
@@ -154,12 +160,18 @@ public:
 
   void addScopeLabel(LexicalScope *LS, DbgLabel *Label);
 
+  void addCallOutline(const DIOutlineId *LS, DbgOutlined *Outlined);
+
   DenseMap<LexicalScope *, ScopeVars> &getScopeVariables() {
     return ScopeVariables;
   }
 
   DenseMap<LexicalScope *, LabelList> &getScopeLabels() {
     return ScopeLabels;
+  }
+
+  DenseMap<const DIOutlineId *, OutlinedList> &getCallOutlines() {
+    return CallOutlines;
   }
 
   DenseMap<const DILocalScope *, DIE *> &getAbstractScopeDIEs() {

@@ -1006,6 +1006,16 @@ namespace llvm {
                                        DIExpression *Expr, const DILocation *DL,
                                        Instruction *InsertBefore);
 
+    /// Insert a new llvm.dbg.outlined intrinsic call.
+    /// \param LinkedInstr  Reference to outlined instruction
+    /// \param CallInstr    Reference to call to the outlined function
+    /// \param DL           Debug info location.
+    /// \param InsertAfter  Location for the new intrinsic.
+    Instruction *insertDbgOutlinedIntrinsic(Instruction *LinkedInstr,
+                                            Instruction *CallInstr,
+                                            const DILocation *DL,
+                                            Instruction *InsertAfter);
+
     /// Replace the vtable holder in the given type.
     ///
     /// If this creates a self reference, it may orphan some unresolved cycles

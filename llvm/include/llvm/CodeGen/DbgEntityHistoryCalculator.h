@@ -20,6 +20,7 @@ namespace llvm {
 class DILocation;
 class LexicalScopes;
 class DINode;
+class MDNode;
 class MachineFunction;
 class TargetRegisterInfo;
 
@@ -146,10 +147,31 @@ public:
   InstrMap::const_iterator end() const { return LabelInstr.end(); }
 };
 
+/// Keep a reference to all DBG_OUTLINED instructions grouped by the call id.
+/// These is used to generate DW_TAG_LLVM_outlined_ref tags.
+class DbgOutlinedInstrMap {
+public:
+  using InlinedEntity = std::pair<const MDNode *, const DILocation *>;
+  using InstrMap =
+      MapVector<InlinedEntity, SmallVector<const MachineInstr *, 4>>;
+
+private:
+  InstrMap OutlinedInstr;
+
+public:
+  void addInstr(InlinedEntity CallId, const MachineInstr &MI);
+
+  bool empty() const { return OutlinedInstr.empty(); }
+  void clear() { OutlinedInstr.clear(); }
+  InstrMap::const_iterator begin() const { return OutlinedInstr.begin(); }
+  InstrMap::const_iterator end() const { return OutlinedInstr.end(); }
+};
+
 void calculateDbgEntityHistory(const MachineFunction *MF,
                                const TargetRegisterInfo *TRI,
                                DbgValueHistoryMap &DbgValues,
-                               DbgLabelInstrMap &DbgLabels);
+                               DbgLabelInstrMap &DbgLabels,
+                               DbgOutlinedInstrMap &DbgOutlines);
 
 } // end namespace llvm
 

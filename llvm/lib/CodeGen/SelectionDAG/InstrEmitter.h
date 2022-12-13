@@ -26,6 +26,7 @@ class MCInstrDesc;
 class SDDbgLabel;
 class SDDbgValue;
 class SDDbgOperand;
+class SDDbgOutlined;
 class TargetLowering;
 class TargetMachine;
 
@@ -136,6 +137,9 @@ public:
 
   /// Generate machine instruction for a dbg_label node.
   MachineInstr *EmitDbgLabel(SDDbgLabel *SD);
+
+  /// Generate machine instruction for a dbg_outlined node.
+  MachineInstr *EmitDbgOutlined(SDDbgOutlined *SD);
 
   /// EmitNode - Generate machine code for a node and needed dependencies.
   ///

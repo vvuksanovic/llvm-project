@@ -10953,6 +10953,13 @@ SDDbgLabel *SelectionDAG::getDbgLabel(DILabel *Label,
   return new (DbgInfo->getAlloc()) SDDbgLabel(Label, DL, O);
 }
 
+/// Creates a SDDbgOutlined node.
+SDDbgOutlined *SelectionDAG::getDbgOutlined(DIOutlineId *OutlineId,
+                                            DIOutlineId *CallId,
+                                            const DebugLoc &DL, unsigned O) {
+  return new (DbgInfo->getAlloc()) SDDbgOutlined(OutlineId, CallId, DL, O);
+}
+
 namespace {
 
 /// RAUWUpdateListener - Helper for ReplaceAllUsesWith - When the node
@@ -11466,6 +11473,8 @@ void SelectionDAG::AddDbgValue(SDDbgValue *DB, bool isParameter) {
 }
 
 void SelectionDAG::AddDbgLabel(SDDbgLabel *DB) { DbgInfo->add(DB); }
+
+void SelectionDAG::AddDbgOutlined(SDDbgOutlined *DB) { DbgInfo->add(DB); }
 
 SDValue SelectionDAG::makeEquivalentMemoryOrdering(SDValue OldChain,
                                                    SDValue NewMemOpChain) {

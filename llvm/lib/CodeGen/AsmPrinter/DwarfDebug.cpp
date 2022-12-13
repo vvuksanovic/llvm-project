@@ -995,6 +995,13 @@ void DwarfDebug::constructCallSiteEntryDIEs(const DISubprogram &SP,
         collectCallSiteParameters(&MI, Params);
         CU.constructCallSiteParmEntryDIEs(CallSiteDIE, Params);
       }
+
+      // Save DIEs for outlined function call sites to emit
+      // DWARF_TAG_LLVM_outline_ref in endModule.
+      if (MI.getOutlineId() && CalleeSP && CalleeSP->isOutlined()) {
+        OutlineCallDIEs.emplace_back(cast<DIOutlineId>(MI.getOutlineId()),
+                                     CallSiteDIE);
+      }
     }
   }
 }
@@ -1256,6 +1263,13 @@ void DwarfDebug::finalizeModuleInfo() {
 
   finishEntityDefinitions();
 
+  for (auto &CallDie : OutlineCallDIEs) {
+    const DIOutlineId *CallId = CallDie.first;
+    DIE &CallSiteDIE = CallDie.second;
+    DwarfCompileUnit *Unit = CUDieMap.lookup(CallSiteDIE.getUnitDie());
+    Unit->createCallSiteOutlineEntries(CallSiteDIE, CallId, OutlineLabelMap);
+  }
+
   // Include the DWO file name in the hash if there's more than one CU.
   // This handles ThinLTO's situation where imported CUs may very easily be
   // duplicate with the same CU partially imported into another ThinLTO unit.
@@ -1497,6 +1511,13 @@ void DwarfDebug::endModule() {
 
   // clean up.
   // FIXME: AbstractVariables.clear();
+
+  // Free outline instruction and function info.
+  for (const auto &Outlines : InfoHolder.getCallOutlines()) {
+    for (auto *Outline : Outlines.second)
+      delete Outline;
+  }
+  InfoHolder.getCallOutlines().clear();
 }
 
 void DwarfDebug::ensureAbstractEntityIsCreatedIfScoped(DwarfCompileUnit &CU,
@@ -1981,6 +2002,26 @@ void DwarfDebug::collectEntityInfo(DwarfCompileUnit &TheCU,
     createConcreteEntity(TheCU, *Scope, Label, IL.second, Sym);
   }
 
+  // For each InlinedEntity collected from DBG_OUTLINED instructions, convert to
+  // DWARF-related DbgOutlined.
+  for (const auto &I : DbgOutlines) {
+    DbgOutlinedInstrMap::InlinedEntity IL = I.first;
+    SmallVector<const MachineInstr *, 4> MIs = I.second;
+    if (MIs.empty())
+      continue;
+
+    const DIOutlineId *CallId = cast<DIOutlineId>(IL.first);
+
+    for (const MachineInstr *MI : MIs) {
+      if (MI == nullptr)
+        continue;
+      InfoHolder.addCallOutline(CallId,
+                                new DbgOutlined(MI->getDebugOutlineRef(),
+                                                MI->getDebugOutlineCall(),
+                                                MI->getDebugLoc()));
+    }
+  }
+
   // Collect info for retained nodes.
   for (const DINode *DN : SP->getRetainedNodes()) {
     const auto *LS = getRetainedNodeScope(DN);
@@ -2285,6 +2326,17 @@ void DwarfDebug::endFunctionImpl(const MachineFunction *MF) {
 
   DenseSet<InlinedEntity> Processed;
   collectEntityInfo(TheCU, SP, Processed);
+
+  // Remember labels in front of outlined instructions.
+  if (MF->getFunction().getSubprogram()->isOutlined()) {
+    for (const auto &BB : *MF) {
+      for (const auto &I : BB) {
+        if (I.getOutlineId())
+          OutlineLabelMap.insert(
+              {cast<DIOutlineId>(I.getOutlineId()), getLabelBeforeInsn(&I)});
+      }
+    }
+  }
 
   // Add the range of this function to the list of ranges for the CU.
   // With basic block sections, add ranges for all basic block sections.

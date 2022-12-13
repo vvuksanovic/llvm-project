@@ -51,6 +51,7 @@ bb2:
 ; CHECK-LABEL: @ham(
 ; CHECK-NEXT:  bb0:
 ; CHECK-NEXT:    call void @outlined_ir_func_0(i64 [[ARG1:%.*]], i64 [[ARG0:%.*]]), !dbg [[DBG6:![0-9]+]]
+; CHECK-NEXT:    call void @llvm.dbg.outlined
 ; CHECK-NEXT:    br label [[BB2:%.*]]
 ; CHECK:       bb2:
 ; CHECK-NEXT:    ret void
@@ -68,11 +69,11 @@ bb2:
 ; CHECK-NEXT:  newFuncRoot:
 ; CHECK-NEXT:    br label [[BB0_TO_OUTLINE:%.*]]
 ; CHECK:       bb0_to_outline:
-; CHECK-NEXT:    br label [[BB1:%.*]]
+; CHECK-NEXT:    br label [[BB1:%.*]], !outline_id !{{[0-9]+}}
 ; CHECK:       bb1:
-; CHECK-NEXT:    [[PHI:%.*]] = phi i64 [ 0, [[BB0_TO_OUTLINE]] ], [ [[TMP0:%.*]], [[BB1]] ]
-; CHECK-NEXT:    [[ICMP:%.*]] = icmp ult i64 [[PHI]], [[TMP1:%.*]]
-; CHECK-NEXT:    br i1 [[ICMP]], label [[BB1]], label [[BB2_EXITSTUB:%.*]], !llvm.loop [[LOOP12:![0-9]+]]
+; CHECK-NEXT:    [[PHI:%.*]] = phi i64 [ 0, [[BB0_TO_OUTLINE]] ], [ [[TMP0:%.*]], [[BB1]] ], !outline_id !{{[0-9]+}}
+; CHECK-NEXT:    [[ICMP:%.*]] = icmp ult i64 [[PHI]], [[TMP1:%.*]], !outline_id !{{[0-9]+}}
+; CHECK-NEXT:    br i1 [[ICMP]], label [[BB1]], label [[BB2_EXITSTUB:%.*]], !llvm.loop [[LOOP12:![0-9]+]], !outline_id !{{[0-9]+}}
 ; CHECK:       bb2.exitStub:
 ; CHECK-NEXT:    ret void
 ;

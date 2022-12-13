@@ -2508,6 +2508,11 @@ static void writeDIImportedEntity(raw_ostream &Out, const DIImportedEntity *N,
   Out << ")";
 }
 
+static void writeDIOutlineId(raw_ostream &Out, const DIOutlineId *DO,
+                             AsmWriterContext &WriterCtx) {
+  Out << "!DIOutlineId()";
+}
+
 static void WriteMDNodeBodyInternal(raw_ostream &Out, const MDNode *Node,
                                     AsmWriterContext &Ctx) {
   if (Node->isDistinct())

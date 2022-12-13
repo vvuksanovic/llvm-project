@@ -819,7 +819,8 @@ void ScheduleDAGInstrs::buildSchedGraph(AAResults *AA,
       continue;
     }
 
-    if (MI.isDebugLabel() || MI.isDebugRef() || MI.isPseudoProbe())
+    if (MI.isDebugLabel() || MI.isDebugRef() || MI.isPseudoProbe() ||
+        MI.isDebugOutlined())
       continue;
 
     SUnit *SU = MISUnitMap[&MI];

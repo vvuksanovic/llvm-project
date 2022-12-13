@@ -115,7 +115,7 @@ entry:
 ; CHECK-SAME: type: [[TYPE:![0-9]+]],
 ; CHECK-SAME: isLocal: false, 
 ; CHECK-SAME: isDefinition: true,
-; CHECK-SAME: flags: DIFlagArtificial,
+; CHECK-SAME: flags: DIFlagOutlined,
 ; CHECK-SAME: isOptimized: true,
 ; CHECK-SAME: unit: !0,
 ; CHECK-SAME: retainedNodes: [[VARS:![0-9]+]]
@@ -126,7 +126,7 @@ entry:
 ; CHECK-SAME: type: [[TYPE]],
 ; CHECK-SAME: isLocal: false, 
 ; CHECK-SAME: isDefinition: true,
-; CHECK-SAME: flags: DIFlagArtificial,
+; CHECK-SAME: flags: DIFlagOutlined,
 ; CHECK-SAME: isOptimized: true,
 ; CHECK-SAME: unit: !0,
 ; CHECK-SAME: retainedNodes: [[VARS]]

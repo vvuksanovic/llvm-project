@@ -259,6 +259,31 @@ public:
   unsigned getOrder() const { return Order; }
 };
 
+/// Holds the information from a dbg_outlined node through SDISel.
+class SDDbgOutlined {
+  MDNode *OutlineId;
+  MDNode *CallId;
+  DebugLoc DL;
+  unsigned Order;
+
+public:
+  SDDbgOutlined(MDNode *OutlineId, MDNode *CallId, DebugLoc dl, unsigned O)
+      : OutlineId(OutlineId), CallId(CallId), DL(std::move(dl)), Order(O) {}
+
+  /// Returns the MDNode pointer for the outlined ref.
+  MDNode *getOutlineId() const { return OutlineId; }
+
+  /// Returns the MDNode pointer for the call instruction.
+  MDNode *getCallId() const { return CallId; }
+
+  /// Returns the DebugLoc.
+  const DebugLoc &getDebugLoc() const { return DL; }
+
+  /// Returns the SDNodeOrder.  This is the order of the preceding node in the
+  /// input.
+  unsigned getOrder() const { return Order; }
+};
+
 } // end llvm namespace
 
 #endif
