@@ -10,11 +10,13 @@
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Breakpoint/BreakpointSite.h"
 #include "lldb/Core/Disassembler.h"
+#include "lldb/Core/Module.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
+#include "lldb/Target/SectionLoadList.h"
 #include "lldb/Target/StopInfo.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
@@ -48,11 +50,15 @@ ThreadPlanStepRange::ThreadPlanStepRange(ThreadPlanKind kind, const char *name,
     m_parent_stack_id = parent_stack->GetStackID();
 }
 
-ThreadPlanStepRange::~ThreadPlanStepRange() { ClearNextBranchBreakpoint(); }
+ThreadPlanStepRange::~ThreadPlanStepRange() {
+  ClearNextBranchBreakpoint();
+  ClearNextOutlineBreakpoint();
+}
 
 void ThreadPlanStepRange::DidPush() {
   // See if we can find a "next range" breakpoint:
   SetNextBranchBreakpoint();
+  SetNextOutlineBreakpoint();
 }
 
 bool ThreadPlanStepRange::ValidatePlan(Stream *error) {
@@ -322,14 +328,54 @@ bool ThreadPlanStepRange::SetNextBranchBreakpoint() {
   // if we haven't already:
   size_t pc_index;
   size_t range_index;
-  InstructionList *instructions =
+  const InstructionList *instructions =
       GetInstructionsForAddress(cur_addr, range_index, pc_index);
   if (instructions == nullptr)
     return false;
   else {
-    const bool ignore_calls = GetKind() == eKindStepOverRange;
-    uint32_t branch_index = instructions->GetIndexOfNextBranchInstruction(
-        pc_index, ignore_calls, &m_found_calls);
+    uint32_t branch_index = 0;
+    if (GetKind() == eKindStepOverRange) {
+      // Step over should step into outlined functions.
+      while (true) {
+        branch_index = instructions->GetIndexOfNextBranchInstruction(
+            pc_index, /*ignore_calls =*/false, &m_found_calls);
+
+        // If we got out of range, stop as usual.
+        if (branch_index == UINT32_MAX) {
+          break;
+        }
+
+        // If a call wasn't found, stop as usual.
+        if (!instructions->GetInstructionAtIndex(branch_index)->IsCall()) {
+          break;
+        }
+
+        // However, if a call was found, check if it was to an outlined function
+        // by getting the call edge from the current function using the return
+        // pc.
+        Address return_address =
+            instructions->GetInstructionAtIndex(branch_index)->GetAddress();
+        return_address.Slide(instructions->GetInstructionAtIndex(branch_index)
+                                 ->GetOpcode()
+                                 .GetByteSize());
+        SymbolContext sc =
+            GetThread().GetStackFrameAtIndex(0)->GetSymbolContext(
+                eSymbolContextFunction);
+        const CallEdge *call_edge = sc.function->GetCallEdgeForReturnAddress(
+            return_address.GetLoadAddress(&GetTarget()), GetTarget());
+        if (call_edge && call_edge->IsOutlined()) {
+          // Outlined call, stop here.
+          break;
+        } else {
+          // Not outlined, continue searching for next branch.
+          pc_index = branch_index + 1;
+        }
+      }
+    } else {
+      branch_index = instructions->GetIndexOfNextBranchInstruction(
+          pc_index, /*ignore_calls =*/false, &m_found_calls);
+    }
+
     Address run_to_address;
 
     // If we didn't find a branch, run to the end of the range.
@@ -425,7 +471,7 @@ bool ThreadPlanStepRange::NextRangeBreakpointExplainsStop(
 bool ThreadPlanStepRange::WillStop() { return true; }
 
 StateType ThreadPlanStepRange::GetPlanRunState() {
-  if (m_next_branch_bp_sp)
+  if (m_next_branch_bp_sp || m_next_outlined_bp_sp)
     return eStateRunning;
   else
     return eStateStepping;
@@ -489,6 +535,83 @@ bool ThreadPlanStepRange::IsPlanStale() {
           SetPlanComplete();
         }
       }
+      return true;
+    }
+  }
+  return false;
+}
+
+bool ThreadPlanStepRange::SetNextOutlineBreakpoint() {
+  if (m_next_outlined_bp_sp) {
+    return true;
+  }
+  Log *log = GetLog(LLDBLog::Step);
+  Thread &thread = GetThread();
+  lldb::StackFrameSP curr_frame = thread.GetStackFrameAtIndex(0);
+  if (curr_frame) {
+    SymbolContext sc = curr_frame->GetSymbolContext(
+        eSymbolContextModule | eSymbolContextFunction | eSymbolContextCompUnit);
+    const CallEdge *call_edge = curr_frame->GetOutlinedCallEdge();
+    if (call_edge) {
+      Address resolvedAddr;
+      GetTarget().GetSectionLoadList().ResolveLoadAddress(
+          GetThread().GetRegisterContext()->GetPC(), resolvedAddr);
+
+      const OutlinedInstruction *currentInstr = nullptr;
+      for (const auto &instr : call_edge->GetOutlinedInstructions()) {
+        if (resolvedAddr.GetFileAddress() == instr.InstructionAddress) {
+          currentInstr = &instr;
+        }
+      }
+
+      const OutlinedInstruction *nextInstr = nullptr;
+      for (const auto &instr : call_edge->GetOutlinedInstructions()) {
+        if (resolvedAddr.GetFileAddress() != LLDB_INVALID_ADDRESS &&
+            instr.InstructionAddress > resolvedAddr.GetFileAddress() &&
+            (!nextInstr ||
+             instr.InstructionAddress < nextInstr->InstructionAddress) &&
+            (!currentInstr || instr.InstructionDecl.GetLine() !=
+                                  currentInstr->InstructionDecl.GetLine())) {
+          nextInstr = &instr;
+        }
+      }
+      if (nextInstr) {
+        ClearNextOutlineBreakpoint();
+        Address bpAddr(nextInstr->InstructionAddress,
+                       sc.module_sp->GetSectionList());
+        m_next_outlined_bp_sp =
+            GetTarget().CreateBreakpoint(bpAddr, true, false);
+        if (m_next_outlined_bp_sp) {
+          m_next_outlined_bp_sp->SetThreadID(m_tid);
+          m_next_outlined_bp_sp->SetBreakpointKind("step-outlined-instr");
+          return true;
+        } else {
+          return false;
+        }
+      }
+    } else {
+      return false;
+    }
+  }
+  return false;
+}
+
+void ThreadPlanStepRange::ClearNextOutlineBreakpoint() {
+  if (m_next_outlined_bp_sp) {
+    GetTarget().RemoveBreakpointByID(m_next_outlined_bp_sp->GetID());
+    m_next_outlined_bp_sp.reset();
+  }
+}
+
+bool ThreadPlanStepRange::NextOutlineBreakpointExplainsStop(
+    lldb::StopInfoSP stop_info_sp) {
+  if (m_next_outlined_bp_sp && stop_info_sp &&
+      stop_info_sp->GetStopReason() == eStopReasonBreakpoint) {
+    break_id_t bp_site_id = stop_info_sp->GetValue();
+    BreakpointSiteSP bp_site_sp =
+        m_process.GetBreakpointSiteList().FindByID(bp_site_id);
+    if (bp_site_sp &&
+        bp_site_sp->IsBreakpointAtThisSite(m_next_outlined_bp_sp->GetID())) {
       return true;
     }
   }

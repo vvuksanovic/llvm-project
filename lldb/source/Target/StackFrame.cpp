@@ -27,6 +27,7 @@
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/RegisterContext.h"
+#include "lldb/Target/SectionLoadList.h"
 #include "lldb/Target/StackFrameRecognizer.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
@@ -1187,6 +1188,14 @@ StackFrame::GetValueObjectForFrameVariable(const VariableSP &variable_sp,
   return valobj_sp;
 }
 
+bool StackFrame::IsOutlined() {
+  if (m_sc.function == nullptr)
+    GetSymbolContext(eSymbolContextFunction);
+  if (m_sc.function)
+    return m_sc.function->IsOutlined();
+  return false;
+}
+
 bool StackFrame::IsInlined() {
   if (m_sc.block == nullptr)
     GetSymbolContext(eSymbolContextBlock);
@@ -1888,6 +1897,80 @@ bool StackFrame::HasCachedData() const {
   return false;
 }
 
+CallEdge *StackFrame::GetOutlinedCallEdge() {
+  ExecutionContext exe_ctx(shared_from_this());
+  Target *target = exe_ctx.GetTargetPtr();
+  GetSymbolContext(eSymbolContextModule | eSymbolContextCompUnit);
+
+  if (!m_sc.function || !m_sc.function->IsOutlined())
+    return nullptr;
+
+  StackFrameSP parent_frame = nullptr;
+  addr_t return_pc = LLDB_INVALID_ADDRESS;
+  uint32_t current_frame_idx = GetFrameIndex();
+  uint32_t num_frames = GetThread()->GetStackFrameCount();
+  for (uint32_t parent_frame_idx = current_frame_idx + 1;
+       parent_frame_idx < num_frames; ++parent_frame_idx) {
+    parent_frame = GetThread()->GetStackFrameAtIndex(parent_frame_idx);
+    // Require a valid sequence of frames.
+    if (!parent_frame)
+      break;
+
+    // Record the first valid return address, even if this is an inlined frame,
+    // in order to look up the associated call edge in the first non-inlined
+    // parent frame.
+    if (return_pc == LLDB_INVALID_ADDRESS)
+      return_pc = parent_frame->GetFrameCodeAddress().GetLoadAddress(
+          exe_ctx.GetTargetPtr());
+
+    // If we've found an inlined frame, skip it.
+    if (parent_frame->IsInlined())
+      continue;
+
+    // We've found the first non-inlined parent frame.
+    break;
+  }
+
+  if (!parent_frame || !parent_frame->GetRegisterContext())
+    return nullptr;
+
+  Function *parent_func =
+      parent_frame->GetSymbolContext(eSymbolContextFunction).function;
+  if (!parent_func)
+    return nullptr;
+
+  Function *current_func = GetSymbolContext(eSymbolContextFunction).function;
+  if (!current_func)
+    return nullptr;
+
+  CallEdge *call_edge = nullptr;
+  ModuleList &modlist = target->GetImages();
+  ExecutionContext parent_exe_ctx = exe_ctx;
+  parent_exe_ctx.SetFrameSP(parent_frame);
+  if (!parent_frame->IsArtificial()) {
+    // If the parent frame is not artificial, the current activation may be
+    // produced by an ambiguous tail call. In this case, refuse to proceed.
+    call_edge = parent_func->GetCallEdgeForReturnAddress(
+        return_pc, exe_ctx.GetTargetRef());
+    if (!call_edge)
+      return nullptr;
+
+    Function *callee_func = call_edge->GetCallee(modlist, parent_exe_ctx);
+    if (callee_func != current_func)
+      return nullptr;
+  } else {
+    // The StackFrameList solver machinery has deduced that an unambiguous tail
+    // call sequence that produced the current activation.  The first edge in
+    // the parent that points to the current function must be valid.
+    for (auto &edge : parent_func->GetTailCallingEdges()) {
+      if (edge->GetCallee(modlist, parent_exe_ctx) == current_func) {
+        call_edge = edge.get();
+      }
+    }
+  }
+  return call_edge;
+}
+
 bool StackFrame::GetStatus(Stream &strm, bool show_frame_info, bool show_source,
                            bool show_unique, const char *frame_marker) {
   if (show_frame_info) {
@@ -1909,10 +1992,31 @@ bool StackFrame::GetStatus(Stream &strm, bool show_frame_info, bool show_source,
           debugger.GetStopSourceLineCount(false);
       disasm_display = debugger.GetStopDisassemblyDisplay();
 
-      GetSymbolContext(eSymbolContextCompUnit | eSymbolContextLineEntry);
+      GetSymbolContext(eSymbolContextModule | eSymbolContextCompUnit |
+                       eSymbolContextLineEntry);
       if (m_sc.comp_unit && m_sc.line_entry.IsValid()) {
         have_debuginfo = true;
         if (source_lines_before > 0 || source_lines_after > 0) {
+          const CallEdge *call_edge = GetOutlinedCallEdge();
+          if (call_edge) {
+            Address resolvedAddr;
+            target->GetSectionLoadList().ResolveLoadAddress(
+                GetThread()->GetRegisterContext()->GetPC(), resolvedAddr);
+            const Declaration *decl = nullptr;
+            for (const auto &instr : call_edge->GetOutlinedInstructions()) {
+              if (instr.InstructionAddress == resolvedAddr.GetFileAddress()) {
+                decl = &instr.InstructionDecl;
+                break;
+              }
+            }
+            if (decl) {
+              m_sc.line_entry.file_sp->Update(decl->GetFile());
+              m_sc.line_entry.line = decl->GetLine();
+              m_sc.line_entry.column = decl->GetColumn();
+              m_sc.line_entry.is_outlined = true;
+            }
+          }
+
           uint32_t start_line = m_sc.line_entry.line;
           if (!start_line && m_sc.function) {
             FileSpec source_file;
@@ -1925,6 +2029,12 @@ bool StackFrame::GetStatus(Stream &strm, bool show_frame_info, bool show_source,
                   source_lines_before, source_lines_after, "->", &strm);
           if (num_lines != 0)
             have_source = true;
+
+          if (m_sc.function && m_sc.function->IsOutlined()) {
+            strm.Printf("Note: this function is outlined.");
+            strm.EOL();
+          }
+
           // TODO: Give here a one time warning if source file is missing.
           if (!m_sc.line_entry.line) {
             ConstString fn_name = m_sc.GetFunctionName();

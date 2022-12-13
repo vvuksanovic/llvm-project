@@ -26,6 +26,8 @@
 
 namespace lldb_private {
 
+class CallEdge;
+
 /// \class StackFrame StackFrame.h "lldb/Target/StackFrame.h"
 ///
 /// This base class provides an interface to stack frames.
@@ -398,6 +400,12 @@ public:
   ///   true if this is an inlined frame.
   bool IsInlined();
 
+  /// Query whether this frame is created for an outliner generated function.
+  ///
+  /// \return
+  ///   true if the function for this frame is outliner generated.
+  bool IsOutlined();
+
   /// Query whether this frame is part of a historical backtrace.
   bool IsHistorical() const;
 
@@ -505,6 +513,8 @@ public:
   void CalculateExecutionContext(ExecutionContext &exe_ctx) override;
 
   lldb::RecognizedStackFrameSP GetRecognizedFrame();
+
+  CallEdge *GetOutlinedCallEdge();
 
 protected:
   friend class StackFrameList;

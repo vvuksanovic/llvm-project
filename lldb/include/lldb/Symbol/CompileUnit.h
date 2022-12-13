@@ -247,6 +247,17 @@ public:
   ///     hasn't been parsed yet.
   LineTable *GetLineTable();
 
+  /// Get the outlined instruction line table for the compile unit.
+  ///
+  /// Called by clients and the SymbolFile plug-in. The SymbolFile plug-ins
+  /// use this function to determine if the line table has be parsed yet.
+  /// Clients use this function to get the line table from a compile unit.
+  ///
+  /// \return
+  ///     The line table object pointer, or NULL if this line table
+  ///     hasn't been parsed yet.
+  std::vector<LineEntry> *GetOutlineLineTable();
+
   DebugMacros *GetDebugMacros();
 
   /// Apply a lambda to each external lldb::Module referenced by this
@@ -347,6 +358,16 @@ public:
   ///     A line table object pointer that this object now owns.
   void SetLineTable(LineTable *line_table);
 
+  /// Set the outlined instruction line table for the compile unit.
+  ///
+  /// Called by the SymbolFile plug-in when if first parses the line table and
+  /// hands ownership of the line table to this object. The compile unit owns
+  /// the line table object and will delete the object when it is deleted.
+  ///
+  /// \param[in] outline_line_table
+  ///     A line table object pointer that this object now owns.
+  void SetOutlineLineTable(std::vector<LineEntry> *outline_line_table);
+
   void SetDebugMacros(const DebugMacrosSP &debug_macros);
 
   /// Set accessor for the variable list.
@@ -428,6 +449,8 @@ protected:
   SupportFileList m_support_files;
   /// Line table that will get parsed on demand.
   std::unique_ptr<LineTable> m_line_table_up;
+  /// Outline line table that will get parsed on demand.
+  std::unique_ptr<std::vector<LineEntry>> m_outline_line_table_up;
   /// Debug macros that will get parsed on demand.
   DebugMacrosSP m_debug_macros_sp;
   /// Global and static variable list that will get parsed on demand.
@@ -443,14 +466,16 @@ private:
     flagsParsedVariables =
         (1u << 1), ///< Have we already parsed globals and statics?
     flagsParsedSupportFiles = (1u << 2), ///< Have we already parsed the support
-                                         ///files for this compile unit?
+                                         /// files for this compile unit?
     flagsParsedLineTable =
         (1u << 3),                   ///< Have we parsed the line table already?
     flagsParsedLanguage = (1u << 4), ///< Have we parsed the language already?
     flagsParsedImportedModules =
         (1u << 5), ///< Have we parsed the imported modules already?
     flagsParsedDebugMacros =
-        (1u << 6) ///< Have we parsed the debug macros already?
+        (1u << 6), ///< Have we parsed the debug macros already?
+    flagsParsedOutlineLineTable =
+        (1u << 7) ///< Have we parsed the outline line table already?
   };
 
   CompileUnit(const CompileUnit &) = delete;

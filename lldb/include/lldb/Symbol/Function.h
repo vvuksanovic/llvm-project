@@ -260,6 +260,18 @@ struct CallSiteParameter {
 /// A vector of \c CallSiteParameter.
 using CallSiteParameterArray = llvm::SmallVector<CallSiteParameter, 0>;
 
+/// \class OutlinedInstruction Function.h "lldb/Symbol/Function.h"
+///
+/// Used to link outlined instruction to its source code location based on the
+/// callee function at runtime.
+struct OutlinedInstruction {
+  lldb::addr_t InstructionAddress;
+  Declaration InstructionDecl;
+};
+
+/// A vector of \c OutlinedInstruction.
+using OutlinedInstructionArray = llvm::SmallVector<OutlinedInstruction, 0>;
+
 /// \class CallEdge Function.h "lldb/Symbol/Function.h"
 ///
 /// Represent a call made within a Function. This can be used to find a path
@@ -292,9 +304,15 @@ public:
 
   bool IsTailCall() const { return is_tail_call; }
 
+  bool IsOutlined() const { return is_outlined; }
+
   /// Get the call site parameters available at this call edge.
   llvm::ArrayRef<CallSiteParameter> GetCallSiteParameters() const {
     return parameters;
+  }
+
+  llvm::ArrayRef<OutlinedInstruction> GetOutlinedInstructions() const {
+    return outlines;
   }
 
   /// Non-tail-calls go first, sorted by the return address. They are followed
@@ -305,7 +323,9 @@ public:
 
 protected:
   CallEdge(AddrType caller_address_type, lldb::addr_t caller_address,
-           bool is_tail_call, CallSiteParameterArray &&parameters);
+           bool is_tail_call, bool is_outlined,
+           CallSiteParameterArray &&parameters,
+           OutlinedInstructionArray &&outlines);
 
   /// Helper that finds the load address of \p unresolved_pc, a file address
   /// which refers to an instruction within \p caller.
@@ -323,8 +343,10 @@ private:
   lldb::addr_t caller_address;
   AddrType caller_address_type;
   bool is_tail_call;
+  bool is_outlined;
 
   CallSiteParameterArray parameters;
+  OutlinedInstructionArray outlines;
 };
 
 /// A direct call site. Used to represent call sites where the address of the
@@ -336,7 +358,8 @@ public:
   /// return PC within the calling function to identify a specific call site.
   DirectCallEdge(const char *symbol_name, AddrType caller_address_type,
                  lldb::addr_t caller_address, bool is_tail_call,
-                 CallSiteParameterArray &&parameters);
+                 bool is_outlined, CallSiteParameterArray &&parameters,
+                 OutlinedInstructionArray &&outlines);
 
   Function *GetCallee(ModuleList &images, ExecutionContext &exe_ctx) override;
 
@@ -365,7 +388,9 @@ public:
   /// a return PC within the calling function to identify a specific call site.
   IndirectCallEdge(DWARFExpressionList call_target,
                    AddrType caller_address_type, lldb::addr_t caller_address,
-                   bool is_tail_call, CallSiteParameterArray &&parameters);
+                   bool is_tail_call, bool is_outlined,
+                   CallSiteParameterArray &&parameters,
+                   OutlinedInstructionArray &&outlines);
 
   Function *GetCallee(ModuleList &images, ExecutionContext &exe_ctx) override;
 
@@ -428,7 +453,7 @@ public:
   ///     The section offset based address for this function.
   Function(CompileUnit *comp_unit, lldb::user_id_t func_uid,
            lldb::user_id_t func_type_uid, const Mangled &mangled,
-           Type *func_type, const AddressRange &range);
+           Type *func_type, const AddressRange &range, bool outlined = false);
 
   /// Destructor.
   ~Function() override;
@@ -563,6 +588,8 @@ public:
   ///     The size of the prologue.
   uint32_t GetPrologueByteSize();
 
+  bool IsOutlined() const { return m_outlined; }
+
   /// Dump a description of this object to a Stream.
   ///
   /// Dump a description of the contents of this object to the supplied stream
@@ -671,6 +698,9 @@ protected:
 
   /// Outgoing call edges.
   std::vector<std::unique_ptr<CallEdge>> m_call_edges;
+
+  /// Whether function has been outlined or not.
+  bool m_outlined = false;
 
 private:
   Function(const Function &) = delete;

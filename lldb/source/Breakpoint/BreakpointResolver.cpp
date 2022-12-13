@@ -335,6 +335,11 @@ void BreakpointResolver::AddLocation(SearchFilter &filter,
   }
 
   BreakpointLocationSP bp_loc_sp(AddLocation(line_start));
+  if (sc.line_entry.IsValid())
+    bp_loc_sp->SetSourceLocation(Declaration(sc.line_entry.GetFile(),
+                                             sc.line_entry.line,
+                                             sc.line_entry.column),
+                                 sc.line_entry.is_outlined);
   if (log && bp_loc_sp && !GetBreakpoint()->IsInternal()) {
     StreamString s;
     bp_loc_sp->GetDescription(&s, lldb::eDescriptionLevelVerbose);

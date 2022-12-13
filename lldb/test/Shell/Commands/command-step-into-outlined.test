@@ -1,0 +1,38 @@
+# RUN: %clang_host -Xclang -disable-llvm-passes -g -O3 -S -emit-llvm %S/Inputs/outlined.c -o %t.ll
+# RUN: opt -passes="iroutliner" -ir-outlining-no-cost=true -S %t.ll -o %t.ll
+# RUN: llc -filetype=obj %t.ll -o %t.o
+# RUN: %clang_host %t.o -o %t
+# RUN: %lldb %t -s %s | FileCheck %s
+
+breakpoint set -f outlined.c -l 9
+process launch
+
+# CHECK: frame #{{.*}}`main at outlined.c
+# CHECK-NOT: Note: this function is outlined.
+
+thread step-in
+
+# CHECK: frame #{{.*}}`outlined_ir_func_0 at outlined.c
+# CHECK: Note: this function is outlined.
+
+thread step-in
+
+# CHECK: frame #{{.*}}`outlined_ir_func_0 at outlined.c
+# CHECK: Note: this function is outlined.
+
+thread step-in
+
+# CHECK: frame #{{.*}}`outlined_ir_func_0 at outlined.c
+# CHECK: Note: this function is outlined.
+
+thread step-in
+
+# CHECK: frame #{{.*}}`foo
+# CHECK-NOT: Note: this function is outlined.
+
+finish
+
+# CHECK: frame #{{.*}}`main at outlined.c
+# CHECK-NOT: Note: this function is outlined.
+
+exit

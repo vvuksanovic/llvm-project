@@ -162,6 +162,7 @@ public:
 
   virtual size_t ParseFunctions(CompileUnit &comp_unit) = 0;
   virtual bool ParseLineTable(CompileUnit &comp_unit) = 0;
+  virtual bool ParseOutlineLineTable(CompileUnit &comp_unit) { return false; };
   virtual bool ParseDebugMacros(CompileUnit &comp_unit) = 0;
 
   /// Apply a lambda to each external lldb::Module referenced by this

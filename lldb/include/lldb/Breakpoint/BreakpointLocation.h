@@ -15,6 +15,7 @@
 #include "lldb/Breakpoint/BreakpointOptions.h"
 #include "lldb/Breakpoint/StoppointHitCounter.h"
 #include "lldb/Core/Address.h"
+#include "lldb/Core/Declaration.h"
 #include "lldb/Utility/UserID.h"
 #include "lldb/lldb-private.h"
 
@@ -279,6 +280,11 @@ public:
   ///     \b true or \b false as given in the description above.
   bool EquivalentToLocation(BreakpointLocation &location);
 
+  void SetSourceLocation(const Declaration &loc, bool is_outlined = false) {
+    m_source_location = loc;
+    m_is_outlined = is_outlined;
+  }
+
   /// Returns the breakpoint location ID.
   lldb::break_id_t GetID() const { return m_loc_id; }
 
@@ -352,6 +358,10 @@ private:
   bool m_is_reexported;
   bool m_is_indirect;
   Address m_address;   ///< The address defining this location.
+  std::optional<lldb_private::Declaration>
+      m_source_location; ///< Source code location for this address, if
+                         ///< available.
+  bool m_is_outlined;    ///< Is the source location outlined.
   Breakpoint &m_owner; ///< The breakpoint that produced this object.
   std::unique_ptr<BreakpointOptions> m_options_up; ///< Breakpoint options
                                                    /// pointer, nullptr if we're

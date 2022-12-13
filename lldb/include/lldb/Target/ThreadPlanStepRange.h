@@ -62,6 +62,12 @@ protected:
 
   bool NextRangeBreakpointExplainsStop(lldb::StopInfoSP stop_info_sp);
 
+  bool SetNextOutlineBreakpoint();
+
+  void ClearNextOutlineBreakpoint();
+
+  bool NextOutlineBreakpointExplainsStop(lldb::StopInfoSP stop_info_sp);
+
   SymbolContext m_addr_context;
   std::vector<AddressRange> m_address_ranges;
   lldb::RunMode m_stop_others;
@@ -74,6 +80,7 @@ protected:
   bool m_first_run_event; // We want to broadcast only one running event, our
                           // first.
   lldb::BreakpointSP m_next_branch_bp_sp;
+  lldb::BreakpointSP m_next_outlined_bp_sp;
   bool m_use_fast_step;
   bool m_given_ranges_only;
   bool m_found_calls = false; // When we set the next branch breakpoint for

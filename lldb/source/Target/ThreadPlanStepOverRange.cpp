@@ -135,6 +135,12 @@ bool ThreadPlanStepOverRange::ShouldStop(Event *event_ptr) {
     LLDB_LOGF(log, "ThreadPlanStepOverRange reached %s.", s.GetData());
   }
 
+  if (NextOutlineBreakpointExplainsStop(GetPrivateStopInfo())) {
+    SetPlanComplete();
+    m_no_more_plans = true;
+    return true;
+  }
+
   // If we're out of the range but in the same frame or in our caller's frame
   // then we should stop. When stepping out we only stop others if we are
   // forcing running one thread.
@@ -176,6 +182,8 @@ bool ThreadPlanStepOverRange::ShouldStop(Event *event_ptr) {
         // rely on that breakpoint to trigger once we return to the range.
         if (m_next_branch_bp_sp)
           return false;
+        if (SetNextOutlineBreakpoint())
+          return false;
         new_plan_sp = thread.QueueThreadPlanForStepOutNoShouldStop(
             false, nullptr, true, stop_others, eVoteNo, eVoteNoOpinion, 0,
             m_status, true);
@@ -189,6 +197,10 @@ bool ThreadPlanStepOverRange::ShouldStop(Event *event_ptr) {
       }
     }
   } else {
+    if (m_next_outlined_bp_sp) {
+      return false;
+    }
+
     // If we're still in the range, keep going.
     if (InRange()) {
       SetNextBranchBreakpoint();
@@ -352,10 +364,11 @@ bool ThreadPlanStepOverRange::DoPlanExplainsStop(Event *event_ptr) {
     if (reason == eStopReasonTrace) {
       return_value = true;
     } else if (reason == eStopReasonBreakpoint) {
-      return_value = NextRangeBreakpointExplainsStop(stop_info_sp);
+      return_value = NextRangeBreakpointExplainsStop(stop_info_sp) ||
+                     NextOutlineBreakpointExplainsStop(stop_info_sp);
     } else {
       if (log)
-        log->PutCString("ThreadPlanStepInRange got asked if it explains the "
+        log->PutCString("ThreadPlanStepOverRange got asked if it explains the "
                         "stop for some reason other than step.");
       return_value = false;
     }
@@ -378,7 +391,7 @@ bool ThreadPlanStepOverRange::DoWillResume(lldb::StateType resume_state,
       if (in_inlined_stack) {
         Log *log = GetLog(LLDBLog::Step);
         LLDB_LOGF(log,
-                  "ThreadPlanStepInRange::DoWillResume: adjusting range to "
+                  "ThreadPlanStepOverRange::DoWillResume: adjusting range to "
                   "the frame at inlined depth %d.",
                   thread.GetCurrentInlinedDepth());
         StackFrameSP stack_sp = thread.GetStackFrameAtIndex(0);

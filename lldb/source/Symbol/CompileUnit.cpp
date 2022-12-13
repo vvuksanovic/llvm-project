@@ -174,12 +174,32 @@ LineTable *CompileUnit::GetLineTable() {
   return m_line_table_up.get();
 }
 
+std::vector<LineEntry> *CompileUnit::GetOutlineLineTable() {
+  if (m_outline_line_table_up == nullptr) {
+    if (m_flags.IsClear(flagsParsedOutlineLineTable)) {
+      m_flags.Set(flagsParsedOutlineLineTable);
+      if (SymbolFile *symfile = GetModule()->GetSymbolFile())
+        symfile->ParseOutlineLineTable(*this);
+    }
+  }
+  return m_outline_line_table_up.get();
+}
+
 void CompileUnit::SetLineTable(LineTable *line_table) {
   if (line_table == nullptr)
     m_flags.Clear(flagsParsedLineTable);
   else
     m_flags.Set(flagsParsedLineTable);
   m_line_table_up.reset(line_table);
+}
+
+void CompileUnit::SetOutlineLineTable(
+    std::vector<LineEntry> *outline_line_table) {
+  if (outline_line_table == nullptr)
+    m_flags.Clear(flagsParsedOutlineLineTable);
+  else
+    m_flags.Set(flagsParsedOutlineLineTable);
+  m_outline_line_table_up.reset(outline_line_table);
 }
 
 DebugMacros *CompileUnit::GetDebugMacros() {
@@ -281,8 +301,33 @@ void CompileUnit::ResolveSymbolContext(
   if (num_file_indexes == 0)
     return;
 
-  // Found a matching source file in this compile unit load its debug info.
+  // Found a matching source file in this compile unit. Load its debug info.
   GetModule()->GetSymbolFile()->SetLoadDebugInfoEnabled();
+
+  // Check regular and outlined tables and pick the best candidate (the one
+  // closer to the requested line).
+  const std::vector<LineEntry> *outlined_line_table =
+      sc.comp_unit->GetOutlineLineTable();
+  const LineEntry *best_outlined_match = nullptr;
+  if (outlined_line_table) {
+    for (const auto &line_entry : *outlined_line_table) {
+      if (!line_entry.GetFile().FileEquals(src_location_spec.GetFileSpec()))
+        continue;
+
+      // First check for an exact match, if that fails check for non exact match
+      // if location spec allows it.
+      if (line_entry.line == src_location_spec.GetLine()) {
+        best_outlined_match = &line_entry;
+        break;
+      } else if (!src_location_spec.GetExactMatch()) {
+        if (line_entry.line > src_location_spec.GetLine() &&
+            (!best_outlined_match ||
+             line_entry.line < best_outlined_match->line)) {
+          best_outlined_match = &line_entry;
+        }
+      }
+    }
+  }
 
   LineTable *line_table = sc.comp_unit->GetLineTable();
 
@@ -322,6 +367,12 @@ void CompileUnit::ResolveSymbolContext(
 
   SourceLocationSpec found_entry(line_entry.GetFile(), line_entry.line, column,
                                  inlines, exact);
+
+  if (best_outlined_match && best_outlined_match->line < line_entry.line) {
+    sc.line_entry = *best_outlined_match;
+    sc_list.Append(sc);
+    return;
+  }
 
   while (line_idx != UINT32_MAX) {
     // If they only asked for the line entry, then we're done, we can

@@ -17,7 +17,7 @@ LineEntry::LineEntry()
     : range(), file_sp(std::make_shared<SupportFile>()),
       original_file_sp(std::make_shared<SupportFile>()),
       is_start_of_statement(0), is_start_of_basic_block(0), is_prologue_end(0),
-      is_epilogue_begin(0), is_terminal_entry(0) {}
+      is_epilogue_begin(0), is_terminal_entry(0), is_outlined(0) {}
 
 void LineEntry::Clear() {
   range.Clear();

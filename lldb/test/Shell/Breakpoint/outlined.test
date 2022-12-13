@@ -1,0 +1,20 @@
+# RUN: %clang_host -Xclang -disable-llvm-passes -g -O3 -S -emit-llvm %S/Inputs/outlined.c -o %t.ll
+# RUN: opt -passes="iroutliner" -ir-outlining-no-cost=true -S %t.ll -o %t.ll
+# RUN: llc -filetype=obj %t.ll -o %t.o
+# RUN: %clang_host %t.o -o %t
+# RUN: %lldb %t -s %s | FileCheck %s
+
+# When setting a breakpoint by file/line in an outlined function
+# the debugger should only stop at that line and not at the same address
+# of another call to that outlined function
+
+breakpoint set -f outlined.c -l 10
+process launch
+
+# CHECK: frame #{{.*}}`outlined_ir_func_0 at outlined.c
+# CHECK: -> 10
+# CHECK: Note: this function is outlined.
+
+continue
+
+# CHECK: Process {{[0-9]+}} exited

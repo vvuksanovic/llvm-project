@@ -117,6 +117,11 @@ public:
 
   bool ParseLineTable(CompileUnit &comp_unit) override;
 
+  void GetOutlineRefs(const CompileUnit &comp_unit, const DWARFDIE &die,
+                      std::vector<LineEntry> &line_entries);
+
+  bool ParseOutlineLineTable(CompileUnit &comp_unit) override;
+
   bool ParseDebugMacros(CompileUnit &comp_unit) override;
 
   bool ForEachExternalModule(CompileUnit &, llvm::DenseSet<SymbolFile *> &,

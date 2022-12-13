@@ -1,0 +1,89 @@
+# RUN: %clang_host -Xclang -disable-llvm-passes -g -O3 -S %S/Inputs/outlining_note.c -emit-llvm -o %t.ll
+# RUN: opt -passes=iroutliner -ir-outlining-no-cost -S %t.ll -o %t.ll
+# RUN: llc -filetype=obj %t.ll -o %t.o
+# RUN: %clang_host %t.o -o %t
+# RUN: %lldb %t -s %s | FileCheck %s
+
+breakpoint set -n main
+process launch
+
+# CHECK: frame #{{.*}}`main at outlining_note.c
+# CHECK-NOT: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`main at outlining_note.c
+# CHECK-NOT: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`main at outlining_note.c
+# CHECK-NOT: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`main at outlining_note.c
+# CHECK-NOT: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`main at outlining_note.c
+# CHECK-NOT: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`main at outlining_note.c
+# CHECK-NOT: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`outlined_ir_func_0 at outlining_note.c
+# CHECK: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`outlined_ir_func_0 at outlining_note.c
+# CHECK: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`outlined_ir_func_0 at outlining_note.c
+# CHECK: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`main at outlining_note.c
+# CHECK-NOT: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`main at outlining_note.c
+# CHECK-NOT: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`main at outlining_note.c
+# CHECK-NOT: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`main at outlining_note.c
+# CHECK-NOT: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`outlined_ir_func_0 at outlining_note.c
+# CHECK: Note: this function is outlined.
+
+thread step-inst
+
+# CHECK: frame #{{.*}}`outlined_ir_func_0 at outlining_note.c
+# CHECK: Note: this function is outlined.
+
+
+
+thread step-inst
+
+# CHECK: Process {{[0-9]+}} stopped
+
+exit

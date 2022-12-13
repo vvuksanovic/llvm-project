@@ -125,9 +125,12 @@ size_t InlineFunctionInfo::MemorySize() const {
 CallEdge::~CallEdge() = default;
 
 CallEdge::CallEdge(AddrType caller_address_type, lldb::addr_t caller_address,
-                   bool is_tail_call, CallSiteParameterArray &&parameters)
+                   bool is_tail_call, bool is_outlined,
+                   CallSiteParameterArray &&parameters,
+                   OutlinedInstructionArray &&outlines)
     : caller_address(caller_address), caller_address_type(caller_address_type),
-      is_tail_call(is_tail_call), parameters(std::move(parameters)) {}
+      is_tail_call(is_tail_call), is_outlined(is_outlined),
+      parameters(std::move(parameters)), outlines(std::move(outlines)) {}
 
 lldb::addr_t CallEdge::GetLoadAddress(lldb::addr_t unresolved_pc,
                                       Function &caller, Target &target) {
@@ -195,9 +198,11 @@ void DirectCallEdge::ParseSymbolFileAndResolve(ModuleList &images) {
 DirectCallEdge::DirectCallEdge(const char *symbol_name,
                                AddrType caller_address_type,
                                lldb::addr_t caller_address, bool is_tail_call,
-                               CallSiteParameterArray &&parameters)
-    : CallEdge(caller_address_type, caller_address, is_tail_call,
-               std::move(parameters)) {
+                               bool is_outlined,
+                               CallSiteParameterArray &&parameters,
+                               OutlinedInstructionArray &&outlines)
+    : CallEdge(caller_address_type, caller_address, is_tail_call, is_outlined,
+               std::move(parameters), std::move(outlines)) {
   lazy_callee.symbol_name = symbol_name;
 }
 
@@ -210,10 +215,11 @@ Function *DirectCallEdge::GetCallee(ModuleList &images, ExecutionContext &) {
 IndirectCallEdge::IndirectCallEdge(DWARFExpressionList call_target,
                                    AddrType caller_address_type,
                                    lldb::addr_t caller_address,
-                                   bool is_tail_call,
-                                   CallSiteParameterArray &&parameters)
-    : CallEdge(caller_address_type, caller_address, is_tail_call,
-               std::move(parameters)),
+                                   bool is_tail_call, bool is_outlined,
+                                   CallSiteParameterArray &&parameters,
+                                   OutlinedInstructionArray &&outlines)
+    : CallEdge(caller_address_type, caller_address, is_tail_call, is_outlined,
+               std::move(parameters), std::move(outlines)),
       call_target(std::move(call_target)) {}
 
 Function *IndirectCallEdge::GetCallee(ModuleList &images,
@@ -256,10 +262,10 @@ Function *IndirectCallEdge::GetCallee(ModuleList &images,
 //
 Function::Function(CompileUnit *comp_unit, lldb::user_id_t func_uid,
                    lldb::user_id_t type_uid, const Mangled &mangled, Type *type,
-                   const AddressRange &range)
+                   const AddressRange &range, bool outlined)
     : UserID(func_uid), m_comp_unit(comp_unit), m_type_uid(type_uid),
       m_type(type), m_mangled(mangled), m_block(func_uid), m_range(range),
-      m_frame_base(), m_flags(), m_prologue_byte_size(0) {
+      m_frame_base(), m_flags(), m_prologue_byte_size(0), m_outlined(outlined) {
   m_block.SetParentScope(this);
   assert(comp_unit != nullptr);
 }

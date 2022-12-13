@@ -1278,6 +1278,76 @@ bool SymbolFileDWARF::ParseLineTable(CompileUnit &comp_unit) {
   return true;
 }
 
+void SymbolFileDWARF::GetOutlineRefs(
+    const CompileUnit &comp_unit, const DWARFDIE &die,
+    std::vector<lldb_private::LineEntry> &line_entries) {
+  if (die) {
+    if (die.Tag() == DW_TAG_LLVM_outlined_ref) {
+      DWARFAttributes attributes = die.GetAttributes();
+      addr_t address;
+      Declaration decl;
+
+      for (size_t i = 0; i < attributes.Size(); ++i) {
+        dw_attr_t attr = attributes.AttributeAtIndex(i);
+        DWARFFormValue form_value;
+
+        if (!attributes.ExtractFormValueAtIndex(i, form_value))
+          continue;
+        switch (attr) {
+        case DW_AT_decl_file:
+          decl.SetFile(
+              attributes.CompileUnitAtIndex(i)->GetFile(form_value.Unsigned()));
+          break;
+        case DW_AT_decl_line:
+          decl.SetLine(form_value.Unsigned());
+          break;
+        case DW_AT_decl_column:
+          decl.SetColumn(form_value.Unsigned());
+          break;
+        case DW_AT_low_pc:
+          address = form_value.Address();
+          break;
+        default:
+          break;
+        }
+      }
+
+      lldb_private::LineEntry line_entry;
+      line_entry.file_sp->Update(decl.GetFile());
+      line_entry.line = decl.GetLine();
+      line_entry.column = decl.GetColumn();
+      line_entry.range =
+          AddressRange(address, 1, comp_unit.GetModule()->GetSectionList());
+      line_entry.is_outlined = true;
+      line_entries.push_back(line_entry);
+    }
+
+    for (DWARFDIE child_die : die.children()) {
+      GetOutlineRefs(comp_unit, child_die, line_entries);
+    }
+  }
+}
+
+bool SymbolFileDWARF::ParseOutlineLineTable(CompileUnit &comp_unit) {
+  std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
+
+  if (comp_unit.GetOutlineLineTable() != nullptr)
+    return true;
+
+  DWARFUnit *dwarf_cu = GetDWARFCompileUnit(&comp_unit);
+  if (!dwarf_cu)
+    return false;
+
+  std::vector<lldb_private::LineEntry> line_entries;
+  GetOutlineRefs(comp_unit, dwarf_cu->DIE(), line_entries);
+
+  std::unique_ptr<std::vector<LineEntry>> outline_line_table_up =
+      std::make_unique<std::vector<LineEntry>>(std::move(line_entries));
+  comp_unit.SetOutlineLineTable(outline_line_table_up.release());
+
+  return true;
+}
+
 lldb_private::DebugMacrosSP
 SymbolFileDWARF::ParseDebugMacros(lldb::offset_t *offset) {
   auto iter = m_debug_macros_map.find(*offset);
@@ -4037,51 +4107,93 @@ size_t SymbolFileDWARF::PopulateBlockVariableList(
   return variable_dies.size();
 }
 
-/// Collect call site parameters in a DW_TAG_call_site DIE.
-static CallSiteParameterArray
+/// Collect call site parameters and outlined instruction locations in a
+/// DW_TAG_call_site DIE.
+static std::pair<CallSiteParameterArray, OutlinedInstructionArray>
 CollectCallSiteParameters(ModuleSP module, DWARFDIE call_site_die) {
   CallSiteParameterArray parameters;
+  OutlinedInstructionArray outlines;
   for (DWARFDIE child : call_site_die.children()) {
-    if (child.Tag() != DW_TAG_call_site_parameter &&
-        child.Tag() != DW_TAG_GNU_call_site_parameter)
-      continue;
+    if (child.Tag() == DW_TAG_call_site_parameter &&
+        child.Tag() == DW_TAG_GNU_call_site_parameter) {
 
-    std::optional<DWARFExpressionList> LocationInCallee;
-    std::optional<DWARFExpressionList> LocationInCaller;
+      std::optional<DWARFExpressionList> LocationInCallee;
+      std::optional<DWARFExpressionList> LocationInCaller;
 
-    DWARFAttributes attributes = child.GetAttributes();
+      DWARFAttributes attributes = child.GetAttributes();
 
-    // Parse the location at index \p attr_index within this call site parameter
-    // DIE, or return std::nullopt on failure.
-    auto parse_simple_location =
-        [&](int attr_index) -> std::optional<DWARFExpressionList> {
-      DWARFFormValue form_value;
-      if (!attributes.ExtractFormValueAtIndex(attr_index, form_value))
-        return {};
-      if (!DWARFFormValue::IsBlockForm(form_value.Form()))
-        return {};
-      auto data = child.GetData();
-      uint64_t block_offset = form_value.BlockData() - data.GetDataStart();
-      uint64_t block_length = form_value.Unsigned();
-      return DWARFExpressionList(
-          module, DataExtractor(data, block_offset, block_length),
-          child.GetCU());
-    };
+      // Parse the location at index \p attr_index within this call site
+      // parameter DIE, or return std::nullopt on failure.
+      auto parse_simple_location =
+          [&](int attr_index) -> std::optional<DWARFExpressionList> {
+        DWARFFormValue form_value;
+        if (!attributes.ExtractFormValueAtIndex(attr_index, form_value))
+          return {};
+        if (!DWARFFormValue::IsBlockForm(form_value.Form()))
+          return {};
+        auto data = child.GetData();
+        uint64_t block_offset = form_value.BlockData() - data.GetDataStart();
+        uint64_t block_length = form_value.Unsigned();
+        return DWARFExpressionList(
+            module, DataExtractor(data, block_offset, block_length),
+            child.GetCU());
+      };
 
-    for (size_t i = 0; i < attributes.Size(); ++i) {
-      dw_attr_t attr = attributes.AttributeAtIndex(i);
-      if (attr == DW_AT_location)
-        LocationInCallee = parse_simple_location(i);
-      if (attr == DW_AT_call_value || attr == DW_AT_GNU_call_site_value)
-        LocationInCaller = parse_simple_location(i);
-    }
+      for (size_t i = 0; i < attributes.Size(); ++i) {
+        dw_attr_t attr = attributes.AttributeAtIndex(i);
+        if (attr == DW_AT_location)
+          LocationInCallee = parse_simple_location(i);
+        if (attr == DW_AT_call_value || attr == DW_AT_GNU_call_site_value)
+          LocationInCaller = parse_simple_location(i);
+      }
 
-    if (LocationInCallee && LocationInCaller) {
-      CallSiteParameter param = {*LocationInCallee, *LocationInCaller};
-      parameters.push_back(param);
+      if (LocationInCallee && LocationInCaller) {
+        CallSiteParameter param = {*LocationInCallee, *LocationInCaller};
+        parameters.push_back(param);
+      }
+    } else if (child.Tag() == DW_TAG_LLVM_outlined_ref) {
+      addr_t InstructionAddress;
+      Declaration InstructionDecl;
+
+      DWARFAttributes attributes = child.GetAttributes();
+
+      for (size_t i = 0; i < attributes.Size(); ++i) {
+        dw_attr_t attr = attributes.AttributeAtIndex(i);
+        DWARFFormValue form_value;
+
+        if (!attributes.ExtractFormValueAtIndex(i, form_value))
+          continue;
+        switch (attr) {
+        case DW_AT_decl_file:
+          InstructionDecl.SetFile(
+              attributes.CompileUnitAtIndex(i)->GetFile(form_value.Unsigned()));
+          break;
+        case DW_AT_decl_line:
+          InstructionDecl.SetLine(form_value.Unsigned());
+          break;
+        case DW_AT_decl_column:
+          InstructionDecl.SetColumn(form_value.Unsigned());
+          break;
+        case DW_AT_low_pc:
+          InstructionAddress = form_value.Address();
+          break;
+        default:
+          break;
+        }
+      }
+
+      if (InstructionAddress && InstructionDecl.IsValid()) {
+        OutlinedInstruction outlinedInstr = {InstructionAddress,
+                                             InstructionDecl};
+        outlines.push_back(outlinedInstr);
+      }
     }
   }
-  return parameters;
+  std::sort(outlines.begin(), outlines.end(),
+            [](const OutlinedInstruction &lhs, const OutlinedInstruction &rhs) {
+              return lhs.InstructionAddress < rhs.InstructionAddress;
+            });
+  return {parameters, outlines};
 }
 
 /// Collect call graph edges present in a function DIE.
@@ -4115,6 +4227,7 @@ SymbolFileDWARF::CollectCallEdges(ModuleSP module, DWARFDIE function_die) {
     addr_t call_inst_pc = LLDB_INVALID_ADDRESS;
     addr_t low_pc = LLDB_INVALID_ADDRESS;
     bool tail_call = false;
+    bool outlined = false;
 
     // Second DW_AT_low_pc may come from DW_TAG_subprogram referenced by
     // DW_TAG_GNU_call_site's DW_AT_abstract_origin overwriting our 'low_pc'.
@@ -4131,6 +4244,9 @@ SymbolFileDWARF::CollectCallEdges(ModuleSP module, DWARFDIE function_die) {
 
       if (attr == DW_AT_call_tail_call || attr == DW_AT_GNU_tail_call)
         tail_call = form_value.Boolean();
+
+      if (attr == DW_AT_LLVM_outlined)
+        outlined = form_value.Boolean();
 
       // Extract DW_AT_call_origin (the call target's DIE).
       if (attr == DW_AT_call_origin || attr == DW_AT_abstract_origin) {
@@ -4200,8 +4316,9 @@ SymbolFileDWARF::CollectCallEdges(ModuleSP module, DWARFDIE function_die) {
     caller_address = FixupAddress(caller_address);
 
     // Extract call site parameters.
-    CallSiteParameterArray parameters =
-        CollectCallSiteParameters(module, child);
+    auto pair = CollectCallSiteParameters(module, child);
+    CallSiteParameterArray parameters = pair.first;
+    OutlinedInstructionArray outlines = pair.second;
 
     std::unique_ptr<CallEdge> edge;
     if (call_origin) {
@@ -4211,7 +4328,7 @@ SymbolFileDWARF::CollectCallEdges(ModuleSP module, DWARFDIE function_die) {
                call_origin->GetPubname(), return_pc, call_inst_pc);
       edge = std::make_unique<DirectCallEdge>(
           call_origin->GetMangledName(), caller_address_type, caller_address,
-          tail_call, std::move(parameters));
+          tail_call, outlined, std::move(parameters), std::move(outlines));
     } else {
       if (log) {
         StreamString call_target_desc;
@@ -4222,7 +4339,7 @@ SymbolFileDWARF::CollectCallEdges(ModuleSP module, DWARFDIE function_die) {
       }
       edge = std::make_unique<IndirectCallEdge>(
           *call_target, caller_address_type, caller_address, tail_call,
-          std::move(parameters));
+          outlined, std::move(parameters), std::move(outlines));
     }
 
     if (log && parameters.size()) {

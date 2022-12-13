@@ -9,6 +9,7 @@
 #include "lldb/Target/ThreadPlanStepInRange.h"
 #include "lldb/Core/Architecture.h"
 #include "lldb/Core/Module.h"
+#include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/Function.h"
 #include "lldb/Symbol/Symbol.h"
 #include "lldb/Target/Process.h"
@@ -138,6 +139,12 @@ bool ThreadPlanStepInRange::ShouldStop(Event *event_ptr) {
   if (IsPlanComplete())
     return true;
 
+  if (NextOutlineBreakpointExplainsStop(GetPrivateStopInfo())) {
+    SetPlanComplete();
+    m_no_more_plans = true;
+    return true;
+  }
+
   m_no_more_plans = false;
   if (m_sub_plan_sp && m_sub_plan_sp->IsPlanComplete()) {
     if (!m_sub_plan_sp->PlanSucceeded()) {
@@ -199,6 +206,9 @@ bool ThreadPlanStepInRange::ShouldStop(Event *event_ptr) {
       // symbol we started in, the we don't need to do this.  This first check
       // isn't strictly necessary, but it is more efficient.
 
+      if (m_next_outlined_bp_sp)
+        return false;
+
       // If we're still in the range, keep going, either by running to the next
       // branch breakpoint, or by stepping.
       if (InRange()) {
@@ -215,9 +225,15 @@ bool ThreadPlanStepInRange::ShouldStop(Event *event_ptr) {
     // branch" breakpoint, so delete it:
     ClearNextBranchBreakpoint();
 
+    // Detect entering outlined function.
+    if (!m_sub_plan_sp && frame_order == eFrameCompareYounger) {
+      if (SetNextOutlineBreakpoint())
+        return false;
+    }
+
     // We may have set the plan up above in the FrameIsOlder section:
 
-    if (!m_sub_plan_sp)
+    if (!m_sub_plan_sp && !m_next_outlined_bp_sp)
       m_sub_plan_sp = thread.QueueThreadPlanForStepThrough(
           m_stack_id, false, stop_others, m_status);
 
@@ -231,14 +247,15 @@ bool ThreadPlanStepInRange::ShouldStop(Event *event_ptr) {
 
     // If not, give the "should_stop" callback a chance to push a plan to get
     // us out of here. But only do that if we actually have stepped in.
-    if (!m_sub_plan_sp && frame_order == eFrameCompareYounger)
+    if (!m_sub_plan_sp && !m_next_outlined_bp_sp &&
+        frame_order == eFrameCompareYounger)
       m_sub_plan_sp = CheckShouldStopHereAndQueueStepOut(frame_order, m_status);
 
     // If we've stepped in and we are going to stop here, check to see if we
     // were asked to run past the prologue, and if so do that.
 
-    if (!m_sub_plan_sp && frame_order == eFrameCompareYounger &&
-        m_step_past_prologue) {
+    if (!m_sub_plan_sp && !m_next_outlined_bp_sp &&
+        frame_order == eFrameCompareYounger && m_step_past_prologue) {
       lldb::StackFrameSP curr_frame = thread.GetStackFrameAtIndex(0);
       if (curr_frame) {
         size_t bytes_to_skip = 0;
@@ -280,7 +297,9 @@ bool ThreadPlanStepInRange::ShouldStop(Event *event_ptr) {
     }
   }
 
-  if (!m_sub_plan_sp) {
+  if (m_next_outlined_bp_sp) {
+    return false;
+  } else if (!m_sub_plan_sp) {
     m_no_more_plans = true;
     SetPlanComplete();
     return true;
@@ -438,7 +457,8 @@ bool ThreadPlanStepInRange::DoPlanExplainsStop(Event *event_ptr) {
       StopReason reason = stop_info_sp->GetStopReason();
 
       if (reason == eStopReasonBreakpoint) {
-        if (NextRangeBreakpointExplainsStop(stop_info_sp)) {
+        if (NextRangeBreakpointExplainsStop(stop_info_sp) ||
+            NextOutlineBreakpointExplainsStop(stop_info_sp)) {
           return_value = true;
         }
       } else if (IsUsuallyUnexplainedStopReason(reason)) {

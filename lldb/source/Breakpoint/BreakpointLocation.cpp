@@ -8,6 +8,8 @@
 
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Breakpoint/BreakpointID.h"
+#include "lldb/Breakpoint/BreakpointResolver.h"
+#include "lldb/Breakpoint/BreakpointResolverFileLine.h"
 #include "lldb/Breakpoint/StoppointCallbackContext.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Module.h"
@@ -33,8 +35,8 @@ BreakpointLocation::BreakpointLocation(break_id_t loc_id, Breakpoint &owner,
                                        const Address &addr, lldb::tid_t tid,
                                        bool hardware, bool check_for_resolver)
     : m_should_resolve_indirect_functions(false), m_is_reexported(false),
-      m_is_indirect(false), m_address(addr), m_owner(owner),
-      m_condition_hash(0), m_loc_id(loc_id), m_hit_counter() {
+      m_is_indirect(false), m_address(addr), m_is_outlined(false),
+      m_owner(owner), m_condition_hash(0), m_loc_id(loc_id), m_hit_counter() {
   if (check_for_resolver) {
     Symbol *symbol = m_address.CalculateSymbolContextSymbol();
     if (symbol && symbol->IsIndirect()) {
@@ -392,6 +394,43 @@ bool BreakpointLocation::ShouldStop(StoppointCallbackContext *context) {
   // count.
   if (!IsEnabled())
     return false;
+
+  // If the stack frame is outlined and the breakpoint was set using a file and
+  // line we should check if the breakpoint location line matches the line of
+  // the current outlined call since the same address belongs to all calls to
+  // the same outlined function.
+  if (m_is_outlined && context->exe_ctx_ref.GetFrameSP()->IsOutlined()) {
+    const BreakpointResolverFileLine *resolver =
+        llvm::dyn_cast<BreakpointResolverFileLine>(
+            GetBreakpoint().GetResolver().get());
+    if (resolver) {
+      // Check if the breakpoint location has valid source line info.
+      if (m_source_location && m_source_location->GetFile() &&
+          m_source_location->GetLine() != LLDB_INVALID_LINE_NUMBER) {
+        const CallEdge *call_edge = context->exe_ctx_ref.GetThreadSP()
+                                        ->GetStackFrameAtIndex(0)
+                                        ->GetOutlinedCallEdge();
+        if (!call_edge)
+          return false;
+
+        for (const auto &instr : call_edge->GetOutlinedInstructions()) {
+          if (instr.InstructionAddress == m_address.GetFileAddress()) {
+            return m_source_location->GetFile() ==
+                       instr.InstructionDecl.GetFile() &&
+                   m_source_location->GetLine() ==
+                       instr.InstructionDecl.GetLine() &&
+                   m_source_location->GetColumn() ==
+                       instr.InstructionDecl.GetColumn();
+          }
+        }
+
+        return false;
+      } else {
+        // Invalid source info.
+        return false;
+      }
+    }
+  }
 
   // We only run synchronous callbacks in ShouldStop:
   context->is_synchronous = true;

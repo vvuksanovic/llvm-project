@@ -167,6 +167,9 @@ struct LineEntry {
   /// Indicates this entry is that of the first byte after the end of a sequence
   /// of target machine instructions.
   uint16_t is_terminal_entry : 1;
+
+  /// Indicates this entry is outlined.
+  uint16_t is_outlined : 1;
 };
 
 /// Less than operator.
