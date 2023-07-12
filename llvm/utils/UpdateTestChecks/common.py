@@ -19,7 +19,6 @@ else:
 _verbose = False
 _prefix_filecheck_ir_name = ''
 
-from UpdateTestChecks import asm
 outlined_fn_to_filecheck_var = {}
 
 def parse_commandline_args(parser):
@@ -691,10 +690,10 @@ def add_checks(output_lines, comment_marker, prefix_list, func_dict, func_name, 
         output_lines.append(check_label_format % (checkprefix, func_name, ''))
         output_lines.append('%s %s-SAME: %s' % (comment_marker, checkprefix, args_and_sig))
       else:
-        # If we are on Mips target check if we generate new name for outlined function that
-        # contains FileCheck variable in it and if so, use that name in CHECK-LABEL directive.
+        # Check if we generated new name for outlined function that contains FileCheck
+        # variable in it and if so, use that name in CHECK directive.
         is_outlined_fn = func_name.find("OUTLINED_FUNCTION")
-        if is_outlined_fn != -1 and asm.target == "mips":
+        if is_outlined_fn != -1:
           new_func_name = outlined_fn_to_filecheck_var[func_name][1]
           # FileCheck local variables don't work inside CHECK-LABEL so we will use CHECK
           # for outlined function names.
@@ -711,12 +710,12 @@ def add_checks(output_lines, comment_marker, prefix_list, func_dict, func_name, 
           if func_line.strip() == '':
             output_lines.append('%s %s-EMPTY:' % (comment_marker, checkprefix))
           else:
-            # We want to generalize outlined function suffixes for Mips target.
+            # We want to generalize outlined function suffixes.
             # For this purpose we use FileCheck variables and we replace outlined
             # function names with it as we go through the assembly instructions.
             outlined_fn_prefix = "OUTLINED_FUNCTION"
             outlined_fn_prefix_index = func_line.find(outlined_fn_prefix)
-            if outlined_fn_prefix_index != -1 and asm.target == "mips":
+            if outlined_fn_prefix_index != -1:
               # Get original outlined function name
               full_outlined_fn_name = func_line[outlined_fn_prefix_index:].split()[0]
               new_outlined_fn_name = ''

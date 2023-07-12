@@ -411,9 +411,6 @@ def get_run_handler(triple):
       handler = s
       best_prefix = prefix
 
-  global target
-  target = best_prefix
-
   if handler is None:
     raise KeyError('Triple %r is not supported' % (triple))
 
