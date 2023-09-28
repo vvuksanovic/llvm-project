@@ -38,7 +38,7 @@ namespace llvm {
   FunctionPass *createMicroMipsSizeReducePass();
   FunctionPass *createMipsExpandPseudoPass();
   FunctionPass *createMipsPreLegalizeCombiner();
-  FunctionPass *createNanoMipsCompressJumpTablesPass();
+  FunctionPass *createNanoMipsOptimizeJumpTablesPass();
   FunctionPass *createNanoMipsLoadStoreOptimizerPass();
   FunctionPass *createNanoMipsMoveOptimizerPass();
   FunctionPass *createNanoMipsRegisterReAllocationPass();
