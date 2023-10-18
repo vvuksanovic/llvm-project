@@ -52,6 +52,7 @@ namespace llvm {
   void initializeMipsBranchExpansionPass(PassRegistry &);
   void initializeMicroMipsSizeReducePass(PassRegistry &);
   void initializeMipsPreLegalizerCombinerPass(PassRegistry&);
+  void initializeNMOptimizeJumpTablesPass (PassRegistry&);
   void initializeNanoMipsRegisterReAllocPass(PassRegistry &);
   void initializeRedundantCopyEliminationPass(PassRegistry&);
 } // end namespace llvm;

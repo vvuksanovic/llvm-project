@@ -30,6 +30,7 @@
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineLoopInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/InitializePasses.h"
 
 #include <cmath>
 
@@ -56,7 +57,9 @@ struct NMOptimizeJumpTables : public MachineFunctionPass {
   bool compressJumpTable(MachineInstr &MI, int Offset);
   bool optimizeRedundantEntries(MachineBasicBlock::iterator &I);
 
-  NMOptimizeJumpTables() : MachineFunctionPass(ID) {}
+  NMOptimizeJumpTables() : MachineFunctionPass(ID) {
+    initializeNMOptimizeJumpTablesPass(*PassRegistry::getPassRegistry());
+  }
   StringRef getPassName() const override {
     return NM_OPTIMIZE_JUMP_TABLES_OPT_NAME;
   }
@@ -71,6 +74,15 @@ struct NMOptimizeJumpTables : public MachineFunctionPass {
   }
 };
 } // namespace
+
+INITIALIZE_PASS_BEGIN(NMOptimizeJumpTables, "nm-optimize-jt", NM_OPTIMIZE_JUMP_TABLES_OPT_NAME,
+                      false, false)
+INITIALIZE_PASS_DEPENDENCY(MachineBlockFrequencyInfo)
+INITIALIZE_PASS_DEPENDENCY(MachineBranchProbabilityInfo)
+INITIALIZE_PASS_DEPENDENCY(ProfileSummaryInfoWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
+INITIALIZE_PASS_END(NMOptimizeJumpTables, "nm-optimize-jt", NM_OPTIMIZE_JUMP_TABLES_OPT_NAME,
+                    false, false)
 
 char NMOptimizeJumpTables::ID = 0;
 
