@@ -254,3 +254,9 @@ Breakpoint 1: where = outlined`outlined_ir_func_0 + 7 at outlined.c, address = 0
    13  	  int c2 = x + y;
 Note: this function is outlined.
 ```
+
+## To do
+
+- Port to [debug records](https://llvm.org/docs/SourceLevelDebugging.html#debug-records): https://llvm.org/docs/RemoveDIsDebugInfo.html
+- Add support for MachineOutliner pass
+- Add support for GlobalIsel
