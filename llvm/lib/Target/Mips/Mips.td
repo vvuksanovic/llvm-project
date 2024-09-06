@@ -276,7 +276,7 @@ def : Proc<"octeon+", [FeatureMips64r2, FeatureCnMips, FeatureCnMipsP]>;
 def : ProcessorModel<"p5600", MipsP5600Model, [ImplP5600]>;
 def : Proc<"nanomips", [FeatureNanoMips]>;
 def : Proc<"nms1", [FeatureNanoMips]>;
-def : ProcessorModel<"i7200", MipsI7200Model, [FeatureI7200]>;
+def : ProcessorModel<"i7200", MipsI7200Model, [FeatureI7200, FeatureGINV]>;
 
 def MipsAsmParser : AsmParser {
   let ShouldEmitMatchRegisterName = 0;
