@@ -146,6 +146,7 @@
 #include "llvm/Transforms/Vectorize/LoopVectorize.h"
 #include "llvm/Transforms/Vectorize/SLPVectorizer.h"
 #include "llvm/Transforms/Vectorize/VectorCombine.h"
+#include "llvm/Transforms/Scalar/FormatStringBounds.h"
 
 using namespace llvm;
 
@@ -563,6 +564,8 @@ PassBuilder::buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
       SimplifyCFGPass(SimplifyCFGOptions().convertSwitchRangeToICmp(true)));
   FPM.addPass(InstCombinePass());
   invokePeepholeEPCallbacks(FPM, Level);
+
+  FPM.addPass(FormatStringBoundsPass());
 
   return FPM;
 }

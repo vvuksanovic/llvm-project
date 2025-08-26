@@ -917,11 +917,12 @@ class EstimateSizeFormatHandler
   /// Whether the format string contains Linux kernel's format specifier
   /// extension.
   bool IsKernelCompatible = true;
+  ArrayRef<const Expr *> Args;
 
 public:
-  EstimateSizeFormatHandler(StringRef Format)
+  EstimateSizeFormatHandler(StringRef Format, ArrayRef<const Expr *> Args)
       : Size(std::min(Format.find(0), Format.size()) +
-             1 /* null byte always written by sprintf */) {}
+             1 /* null byte always written by sprintf */), Args(Args) {}
 
   bool HandlePrintfSpecifier(const analyze_printf::PrintfSpecifier &FS,
                              const char *, unsigned SpecifierLen,
@@ -1324,7 +1325,7 @@ void Sema::checkFortifiedBuiltinMemoryFunction(FunctionDecl *FD,
     StringRef FormatStrRef;
     size_t StrLen;
     if (ProcessFormatStringLiteral(FormatExpr, FormatStrRef, StrLen, Context)) {
-      EstimateSizeFormatHandler H(FormatStrRef);
+      EstimateSizeFormatHandler H(FormatStrRef, /* ArrayRef(TheCall->getArgs()) */ {});
       const char *FormatBytes = FormatStrRef.data();
       if (!analyze_format_string::ParsePrintfString(
               H, FormatBytes, FormatBytes + StrLen, getLangOpts(),
@@ -1413,7 +1414,7 @@ void Sema::checkFortifiedBuiltinMemoryFunction(FunctionDecl *FD,
     size_t StrLen;
     if (SourceSize &&
         ProcessFormatStringLiteral(FormatExpr, FormatStrRef, StrLen, Context)) {
-      EstimateSizeFormatHandler H(FormatStrRef);
+      EstimateSizeFormatHandler H(FormatStrRef, {});
       const char *FormatBytes = FormatStrRef.data();
       if (!analyze_format_string::ParsePrintfString(
               H, FormatBytes, FormatBytes + StrLen, getLangOpts(),
