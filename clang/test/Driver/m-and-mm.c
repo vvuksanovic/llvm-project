@@ -1,5 +1,5 @@
-// RUN: %clang -M %s 2>&1 | FileCheck %s --implicit-check-not=warning
-// RUN: %clang -MM %s 2>&1 | FileCheck %s --implicit-check-not=warning
+// RUN: %clang -M %s 2>&1 | FileCheck %s --implicit-check-not="warning:"
+// RUN: %clang -MM %s 2>&1 | FileCheck %s --implicit-check-not="warning:"
 
 // CHECK: m-and-mm.o:
 // TEST-I: {{.*}}test.i:

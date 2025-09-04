@@ -84,7 +84,7 @@ export module Hello;
 
 // CHECK-OVERRIDE-WARN: warning: the implicit output of reduced BMI may be overrided by the output file specified by '--precompile'. {{.*}}-Wreduced-bmi-output-overrided
 
-// NO_WARN-NOT: warning
+// NO_WARN-NOT: warning:
 
 //--- Hello.cc
 

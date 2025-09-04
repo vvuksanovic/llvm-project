@@ -18,5 +18,5 @@
 
 // RUN: rm %t.json
 
-// CHECK-NOT: warning
+// CHECK-NOT: warning:
 // CHECK2: warning: code should be clang-formatted

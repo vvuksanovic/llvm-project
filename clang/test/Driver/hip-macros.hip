@@ -57,7 +57,7 @@
 // RUN:   -Xclang -target-feature -Xclang "-image-insts" %s 2>&1 | FileCheck --check-prefixes=IMAGE,WARN %s
 // RUN: %clang -E -dM --offload-arch=gfx942 --cuda-device-only -nogpuinc -nogpulib \
 // RUN:   -Xclang -target-feature -Xclang "+image-insts" %s 2>&1 | FileCheck --check-prefixes=NOIMAGE,WARN %s
-// NOWARN-NOT: warning
+// NOWARN-NOT: warning:
 // WARN: warning: feature flag '{{[+|-]}}image-insts' is ignored since the feature is read only [-Winvalid-command-line-argument]
 // IMAGE-NOT: #define __HIP_NO_IMAGE_SUPPORT__
 // IMAGE-NOT: #define __HIP_NO_IMAGE_SUPPORT

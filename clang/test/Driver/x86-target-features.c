@@ -13,7 +13,7 @@
 // MMX-NOT: "3dnow"
 // MMX: "-target-feature" "+mmx"
 // MMX-NOT: "3dnow"
-// NO-MMX-NOT: warning
+// NO-MMX-NOT: warning:
 // NO-MMX: "-target-feature" "-mmx"
 
 // RUN: %clang --target=i386 -march=i386 -msse -msse2 -msse3 -mssse3 -msse4a -msse4.1 -msse4.2 %s -### 2>&1 | FileCheck -check-prefix=SSE %s
