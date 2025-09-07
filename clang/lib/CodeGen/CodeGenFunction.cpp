@@ -49,6 +49,7 @@
 #include "llvm/Transforms/Scalar/LowerExpectIntrinsic.h"
 #include "llvm/Transforms/Utils/PromoteMemToReg.h"
 #include <optional>
+#include <string>
 
 using namespace clang;
 using namespace CodeGen;
@@ -1017,6 +1018,19 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
       }
     } else if (CGM.getCodeGenOpts().FunctionReturnThunks)
       Fn->addFnAttr(llvm::Attribute::FnRetThunkExtern);
+  }
+
+  if (D) {
+    llvm::errs() << "adding attribute\n";
+    if (FD && FD->getAttr<FormatAttr>()) {
+      llvm::errs() << "asdadshfjtkrthrbyrtbe\n";
+    }
+    if (auto *A = D->getAttr<FormatAttr>()) {
+      llvm::errs() << "found format function " << A->getType()->getName() << " " << A->getFormatIdx() << "\n";
+      // if (A->getType()->getName() == "printf") {
+        Fn->addFnAttr("format_printf", std::to_string(A->getFormatIdx()));
+      // }
+    }
   }
 
   if (FD && (getLangOpts().OpenCL ||

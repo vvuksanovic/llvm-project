@@ -1,4 +1,4 @@
-// RUN: %clang -g -O1 -c -Wformat %s 2>&1 | FileCheck %s
+// RUN: %clang -g -O1 -c -Wformat %s -Xclang -verify
 
 #define NULL ((void*)0)
 
@@ -23,12 +23,12 @@ void test() {
   int a, b, c;
 
   // Check for null string format
-  sprintf(dest, NULL, a); // CHECK: [[@LINE]]:3: Null format string
+  sprintf(dest, NULL, a); // expected-warning {{null format string}}
 
   int bool1, bool2, bool3;
   scanf("%d%d%d", &bool1, &bool2, &bool3);
   const char *fmt = bool1 ? NULL : bool2 ? NULL : bool3 ? NULL : NULL;
-  sprintf(dest, fmt, a); // CHECK: [[@LINE]]:3: Null format string
+  sprintf(dest, fmt, a); // expected-warning {{null format string}}
 
-  sprintf(dest, return_null(), a); // CHECK: [[@LINE]]:3: Null format string
+  sprintf(dest, return_null(), a); // expected-warning {{null format string}}
 }

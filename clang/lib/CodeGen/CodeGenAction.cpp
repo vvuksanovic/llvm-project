@@ -17,6 +17,7 @@
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclGroup.h"
 #include "clang/Basic/DiagnosticFrontend.h"
+#include "clang/Basic/DiagnosticSema.h"
 #include "clang/Basic/FileManager.h"
 #include "clang/Basic/LangStandard.h"
 #include "clang/Basic/SourceManager.h"
@@ -759,6 +760,49 @@ void BackendConsumer::MisExpectDiagHandler(
         << Filename << Line << Column;
 }
 
+void BackendConsumer::FormatStringBoundsDiagHandler(
+    const llvm::DiagnosticInfoFormatStringBounds &D) {
+  StringRef Filename;
+  unsigned Line, Column;
+  bool BadDebugInfo = false;
+  FullSourceLoc Loc =
+      getBestLocationFromDebugLoc(D, BadDebugInfo, Filename, Line, Column);
+
+  Diags.Report(Loc, D.getIsOverflow() ? diag::warn_format_overflow
+                                      : diag::warn_format_truncation)
+      << D.getFunctionName() << D.getDestinationSize()
+      << D.getMinRange();
+
+  if (BadDebugInfo)
+    // If we were not able to translate the file:line:col information
+    // back to a SourceLocation, at least emit a note stating that
+    // we could not translate this location. This can happen in the
+    // case of #line directives.
+    Diags.Report(Loc, diag::note_fe_backend_invalid_loc)
+        << Filename << Line << Column;
+}
+
+void BackendConsumer::FormatStringNullDiagHandler(
+    const llvm::DiagnosticInfoFormatStringNull &D) {
+  StringRef Filename;
+  unsigned Line, Column;
+  bool BadDebugInfo = false;
+  FullSourceLoc Loc =
+      getBestLocationFromDebugLoc(D, BadDebugInfo, Filename, Line, Column);
+
+  Diags.Report(Loc, D.getIsOverflow()
+                        ? diag::warn_null_format_string_overflow
+                        : diag::warn_null_format_string_truncation);
+
+  if (BadDebugInfo)
+    // If we were not able to translate the file:line:col information
+    // back to a SourceLocation, at least emit a note stating that
+    // we could not translate this location. This can happen in the
+    // case of #line directives.
+    Diags.Report(Loc, diag::note_fe_backend_invalid_loc)
+        << Filename << Line << Column;
+}
+
 /// This function is invoked when the backend needs
 /// to report something to the user.
 void BackendConsumer::DiagnosticHandlerImpl(const DiagnosticInfo &DI) {
@@ -840,6 +884,12 @@ void BackendConsumer::DiagnosticHandlerImpl(const DiagnosticInfo &DI) {
     return;
   case llvm::DK_MisExpect:
     MisExpectDiagHandler(cast<DiagnosticInfoMisExpect>(DI));
+    return;
+  case llvm::DK_FormatStringBounds:
+    FormatStringBoundsDiagHandler(cast<DiagnosticInfoFormatStringBounds>(DI));
+    return;
+  case llvm::DK_FormatStringNull:
+    FormatStringNullDiagHandler(cast<DiagnosticInfoFormatStringNull>(DI));
     return;
   default:
     // Plugin IDs are not bound to any value as they are set dynamically.

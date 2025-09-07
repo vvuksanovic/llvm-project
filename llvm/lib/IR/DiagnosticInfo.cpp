@@ -489,3 +489,26 @@ void DiagnosticInfoDontCall::print(DiagnosticPrinter &DP) const {
   if (!getNote().empty())
     DP << ": " << getNote();
 }
+
+DiagnosticInfoFormatStringBounds::DiagnosticInfoFormatStringBounds(const Function &Fn, const DiagnosticLocation &Loc,
+                             StringRef PrintFunctionName, bool IsOverflow,
+                             unsigned MinRange, unsigned DestinationSize)
+      : DiagnosticInfoWithLocationBase(DK_FormatStringBounds, DS_Warning, Fn, Loc),
+        FunctionName(PrintFunctionName), IsOverflow(IsOverflow),
+        MinRange(MinRange), DestinationSize(DestinationSize) {}
+
+void DiagnosticInfoFormatStringBounds::print(DiagnosticPrinter &DP) const {
+  if (IsOverflow)
+    DP << getLocationStr() << ": '" << FunctionName
+       << "' will always overflow; destination buffer has size "
+       << DestinationSize << ", but format string expands to at least "
+       << MinRange;
+  else
+    DP << getLocationStr() << ": '" << FunctionName
+       << "' will always be truncated; specified size is " << DestinationSize
+       << ", but format string expands to at least " << MinRange;
+}
+
+void DiagnosticInfoFormatStringNull::print(DiagnosticPrinter &DP) const {
+  DP << getLocationStr() << ": Format string is null";
+}

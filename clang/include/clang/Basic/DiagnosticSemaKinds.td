@@ -962,6 +962,10 @@ def subst_format_overflow : TextSubstitution<
   "'%0' will always overflow; destination buffer has size %1,"
   " but format string expands to at least %2">;
 
+def warn_null_format_string_overflow : Warning<
+  "null format string">,
+  InGroup<FormatOverflow>;
+
 def warn_format_overflow : Warning<
   "%sub{subst_format_overflow}0,1,2">,
   InGroup<FormatOverflow>;
@@ -973,6 +977,10 @@ def warn_format_overflow_non_kprintf : Warning<
 def subst_format_truncation: TextSubstitution<
   "'%0' will always be truncated; specified size is %1,"
   " but format string expands to at least %2">;
+
+def warn_null_format_string_truncation : Warning<
+  "null format string">,
+  InGroup<FormatTruncation>;
 
 def warn_format_truncation: Warning<
   "%sub{subst_format_truncation}0,1,2">,

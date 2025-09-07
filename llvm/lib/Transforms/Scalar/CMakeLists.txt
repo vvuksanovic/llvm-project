@@ -15,6 +15,7 @@ add_llvm_component_library(LLVMScalarOpts
   FlattenCFGPass.cpp
   Float2Int.cpp
   FormatStringBounds.cpp
+  FormatStringNull.cpp
   GuardWidening.cpp
   GVN.cpp
   GVNHoist.cpp

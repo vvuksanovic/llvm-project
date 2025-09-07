@@ -7,20 +7,14 @@
 
 namespace llvm {
 
-// class FormatStringBoundsPass : public FunctionPass {
-// public:
-//   static char ID;
-
-//   FormatStringBoundsPass();
-
-//   bool runOnFunction(Function &F) override;
-// };
-
 class FormatStringBoundsPass : public PassInfoMixin<FormatStringBoundsPass> {
 public:
-  FormatStringBoundsPass();
+  FormatStringBoundsPass(int Level = 1);
 
   PreservedAnalyses run(Function &F, FunctionAnalysisManager &AM);
+
+private:
+  int Level;
 };
 
 } // namespace llvm

@@ -91,6 +91,8 @@ enum DiagnosticKind {
   DK_SrcMgr,
   DK_DontCall,
   DK_MisExpect,
+  DK_FormatStringBounds,
+  DK_FormatStringNull,
   DK_FirstPluginKind // Must be last value to work with
                      // getNextAvailablePluginDiagnosticKind
 };
@@ -1170,6 +1172,51 @@ public:
   static bool classof(const DiagnosticInfo *DI) {
     return DI->getKind() == DK_DontCall;
   }
+};
+
+class DiagnosticInfoFormatStringBounds : public DiagnosticInfoWithLocationBase {
+public:
+  DiagnosticInfoFormatStringBounds(const Function &Fn,
+                                   const DiagnosticLocation &Loc,
+                                   StringRef PrintFunctionName, bool IsOverflow,
+                                   unsigned MinRange, unsigned DestinationSize);
+
+  void print(DiagnosticPrinter &DP) const override;
+
+  static bool classof(const DiagnosticInfo *DI) {
+    return DI->getKind() == DK_FormatStringBounds;
+  }
+
+  StringRef getFunctionName() const { return FunctionName; }
+  bool getIsOverflow() const { return IsOverflow; }
+  unsigned getMinRange() const { return MinRange; }
+  unsigned getDestinationSize() const { return DestinationSize; }
+
+private:
+  StringRef FunctionName;
+  bool IsOverflow; // Overflow or truncation.
+  unsigned MinRange;
+  unsigned DestinationSize;
+};
+
+class DiagnosticInfoFormatStringNull : public DiagnosticInfoWithLocationBase {
+public:
+  DiagnosticInfoFormatStringNull(const Function &Fn,
+                                 const DiagnosticLocation &Loc, bool IsOverflow)
+      : DiagnosticInfoWithLocationBase(DK_FormatStringNull, DS_Warning, Fn,
+                                       Loc),
+        IsOverflow(IsOverflow) {}
+
+  void print(DiagnosticPrinter &DP) const override;
+
+  static bool classof(const DiagnosticInfo *DI) {
+    return DI->getKind() == DK_FormatStringNull;
+  }
+
+  bool getIsOverflow() const { return IsOverflow; }
+
+private:
+  bool IsOverflow; // Overflow or truncation.
 };
 
 } // end namespace llvm
