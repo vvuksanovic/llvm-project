@@ -2519,6 +2519,16 @@ void CodeGenModule::ConstructAttributeList(StringRef Name,
     if (TargetDecl->hasAttr<BPFFastCallAttr>())
       FuncAttrs.addAttribute("bpf_fastcall");
 
+    if (auto *Format = TargetDecl->getAttr<FormatAttr>()) {
+      llvm::errs() << "found function with format "
+                   << Format->getType()->getName() << "\n";
+      if (Format->getType()->getName() == "printf") {
+        // Change format index from 1-based to 0-based.
+        FuncAttrs.addRawIntAttr(llvm::Attribute::FormatPrintf,
+                                Format->getFormatIdx() - 1);
+      }
+    }
+
     HasOptnone = TargetDecl->hasAttr<OptimizeNoneAttr>();
     if (auto *AllocSize = TargetDecl->getAttr<AllocSizeAttr>()) {
       std::optional<unsigned> NumElemsParam;
