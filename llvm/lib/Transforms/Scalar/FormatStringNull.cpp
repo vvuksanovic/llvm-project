@@ -19,9 +19,6 @@ PreservedAnalyses FormatStringNullPass::run(Function &F,
       if (CallInst *CI = dyn_cast<CallInst>(&Inst)) {
         bool IsBounded;
         unsigned FormatStringIdx;
-        llvm::dbgs() << "found call inst\n";
-        CI->print(llvm::errs());
-        llvm::errs() << "\n";
 
         LibFunc CallFunc;
         if (TLI.getLibFunc(*CI->getCalledFunction(), CallFunc)) {
@@ -68,12 +65,8 @@ PreservedAnalyses FormatStringNullPass::run(Function &F,
         // Process the format string.
         Value *FormatStrValue = CI->getArgOperand(FormatStringIdx);
 
-        llvm::errs() << "found format function\n";
-
         // Diagnose and exit if the format string is null.
         if (isa<ConstantPointerNull>(FormatStrValue)) {
-          llvm::errs() << "diagnose\n";
-
           F.getContext().diagnose(
               DiagnosticInfoFormatStringNull(F, CI->getDebugLoc(), IsBounded));
         }

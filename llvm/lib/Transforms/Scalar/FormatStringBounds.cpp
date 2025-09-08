@@ -99,8 +99,8 @@ static FormatDirective getLiteralDirective(const char *Begin, const char *End) {
 }
 
 static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
-                                      const CallInst *CI, unsigned &ArgNo,
-                                      const LazyValueInfo &LVI) {
+                                      CallInst *CI, unsigned &ArgNo,
+                                      LazyValueInfo &LVI) {
   FormatDirective Dir;
   Dir.BeginPos = Begin;
 
@@ -176,8 +176,12 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
         // we ignore that part.
         auto ArgWidth = std::abs(ArgWidthConst->getSExtValue());
         Dir.Width = {ArgWidth, ArgWidth};
+      } else {
+        // If the value is not constant use LVI to find the bounds.
+        ConstantRange ArgRange = LVI.getConstantRange(ArgWidthValue, CI, false);
+        Dir.Width = {ArgRange.getUnsignedMin().getZExtValue(),
+                     ArgRange.getUnsignedMax().getZExtValue()};
       }
-      // TODO: Use LVI to find the lower bound.
     } else {
       // The argument is supplied via varargs and we can't use it.
       Dir.Width = std::nullopt;
@@ -215,8 +219,13 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
           }
           auto ArgPrecision = ArgPrecisionConst->getZExtValue();
           Dir.Precision = {ArgPrecision, ArgPrecision};
+        } else {
+          // If the value is not constant use LVI to find the bounds.
+          ConstantRange ArgRange =
+              LVI.getConstantRange(ArgPrecisionValue, CI, false);
+          Dir.Precision = {ArgRange.getUnsignedMin().getZExtValue(),
+                           ArgRange.getUnsignedMax().getZExtValue()};
         }
-        // TODO: Use LVI to find the lower bound.
       } else {
         // The width is specified in the format string.
         Dir.Precision = std::nullopt;
@@ -288,12 +297,9 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
 
 struct FormatRange {
   long long Min;
-  long long Max;
   long long Likely;
-  long long Unlikely;
 
-  FormatRange(long long Value)
-      : Min(Value), Max(Value), Likely(Value), Unlikely(Value) {}
+  FormatRange(long long Value) : Min(Value), Likely(Value) {}
 };
 
 class FormatResult {
@@ -315,8 +321,6 @@ private:
 void FormatResult::increment(unsigned Val) {
   Range.Min += Val;
   Range.Likely += Val;
-  Range.Max += Val;
-  Range.Unlikely += Val;
 }
 
 static size_t getMaxDigitsForWidth(size_t BitWidth, unsigned Base = 10) {
@@ -336,44 +340,20 @@ static size_t getMaxDigitsForWidth(size_t BitWidth, unsigned Base = 10) {
 void FormatResult::adjust(std::optional<long long> AdjMin,
                           std::optional<long long> AdjMax, Type *T,
                           unsigned Base, unsigned Adj) {
-  bool MinAdjusted = false;
   if (AdjMin) {
     if (Range.Min < AdjMin) {
       Range.Min = *AdjMin;
-      MinAdjusted = true;
     }
     if (Range.Likely < Range.Min)
       Range.Likely = Range.Min;
-  } else if (AdjMin == std::numeric_limits<long long>().min() &&
-             AdjMax == std::numeric_limits<long long>().max()) {
-    KnownRange = false; // TODO: Why?
-  }
-
-  if (AdjMax) {
-    if (Range.Max < AdjMax) {
-      Range.Max = *AdjMax;
-      KnownRange = MinAdjusted;
-    }
   }
 
   if (Level > 1 && T) {
     assert(T->isIntegerTy() && "Not an integer type");
-    // TODO: Use T
     unsigned Digits = getMaxDigitsForWidth(T->getIntegerBitWidth());
     if (AdjMin < Digits && Digits < AdjMax && Range.Likely < Digits) {
       Range.Likely = Digits + Adj;
     }
-  } else if (Range.Likely < (Range.Min ? Range.Min : 1)) {
-    Range.Likely =
-        (Range.Min ? Range.Min
-         : Range.Max &&
-                 (Range.Max < std::numeric_limits<int>().max() || Level > 1)
-             ? 1
-             : 0);
-  }
-
-  if (Range.Unlikely < Range.Max) {
-    Range.Unlikely = Range.Max;
   }
 }
 
@@ -402,31 +382,29 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
   if (CurrentArg >= CI->getNumOperands()) {
     // Either va_list or missing argument. Guess the type based on the format
     // string.
-    switch (Dir.Modifier) {
-    case FormatDirective::h:
-      T = Type::getInt16Ty(CI->getFunction()->getContext());
-      break;
-    case FormatDirective::hh:
-      T = Type::getInt8Ty(CI->getFunction()->getContext());
-      break;
-    case FormatDirective::l:
-    case FormatDirective::ll:
-    case FormatDirective::j:
-    case FormatDirective::z:
-      T = Type::getInt64Ty(CI->getFunction()->getContext());
-      break;
-    case FormatDirective::NONE:
-    default:
-      T = Type::getInt32Ty(CI->getFunction()->getContext());
-      break;
-    }
-    llvm::errs() << "Missing arg, using type instead\n";
-    T->print(llvm::errs(), true);
-    llvm::errs() << "\n";
+    // switch (Dir.Modifier) {
+    // case FormatDirective::h:
+    //   T = Type::getInt16Ty(CI->getFunction()->getContext());
+    //   break;
+    // case FormatDirective::hh:
+    //   T = Type::getInt8Ty(CI->getFunction()->getContext());
+    //   break;
+    // case FormatDirective::l:
+    // case FormatDirective::ll:
+    // case FormatDirective::j:
+    // case FormatDirective::z:
+    //   T = Type::getInt64Ty(CI->getFunction()->getContext());
+    //   break;
+    // case FormatDirective::NONE:
+    // default:
+    //   T = Type::getInt32Ty(CI->getFunction()->getContext());
+    //   break;
+    // }
+    // llvm::errs() << "Missing arg, using type instead\n";
+    // T->print(llvm::errs(), true);
+    // llvm::errs() << "\n";
 
     DirRes.Range.Min = DirRes.Range.Likely = 1;
-    DirRes.Range.Max = DirRes.Range.Unlikely =
-        getMaxDigitsForWidth(T->getIntegerBitWidth());
 
     // DirRes.Range
     assert(false && "Not implemented yet");
@@ -439,73 +417,73 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
     Val->print(llvm::errs());
     llvm::errs() << "\n";
 
-    std::optional<unsigned> TypeSize = std::nullopt;
-    std::optional<bool> IsSigned = std::nullopt;
-    if (const auto *Int = dyn_cast<ConstantInt>(Val)) {
-      llvm::errs() << "arg is a constant, using that type\n";
-      TypeSize = Int->getBitWidth();
-    } else if (const auto *ZEI = dyn_cast<ZExtInst>(Val)) {
-      IsSigned = false;
-      llvm::errs() << "determined type is unsigned from zext instruction\n";
-      TypeSize = ZEI->getSrcTy()->getIntegerBitWidth();
-      llvm::errs() << "using source type with width " << TypeSize.value()
-                   << "\n";
-    } else if (const auto *SEI = dyn_cast<SExtInst>(Val)) {
-      IsSigned = true;
-      llvm::errs() << "determined type is signed from sext instruction\n";
-      TypeSize = SEI->getSrcTy()->getIntegerBitWidth();
-      llvm::errs() << "using source type with width " << TypeSize.value()
-                   << "\n";
-    } else {
-      llvm::errs() << "determining type based on debug info\n";
-      SmallVector<DbgVariableIntrinsic *> DbgUsers;
-      findDbgUsers(DbgUsers, Val);
-      llvm::errs() << "point 1\n";
-      // TODO: Multiple dbg values? Why in a loop, use just the last one?
-      for (const auto *User : llvm::reverse(DbgUsers)) {
-        llvm::errs() << "point 2\n";
-        DILocalVariable *Var = User->getVariable();
-        Var->getType()->print(llvm::errs(), CI->getModule(), true);
-        Var->getRawType()->print(llvm::errs(), CI->getModule(), true);
-        llvm::errs() << "type size is " << Var->getSizeInBits().value_or(0)
-                     << " bits\n";
-        llvm::errs() << "type signedness is "
-                     << (Var->getSignedness().has_value()
-                             ? -1
-                             : (int)Var->getSignedness().value())
-                     << "(Unknown, Signed, Unsigned)\n";
-        if (Var->getSignedness().has_value())
-          IsSigned = Var->getSignedness() == DIBasicType::Signedness::Signed;
-        if (Var->getSizeInBits())
-          TypeSize = Var->getSizeInBits().value();
-        if (IsSigned && TypeSize)
-          break;
-      }
-      if (!IsSigned.has_value())
-        llvm::errs() << "unable to determine is type signed\n";
-      if (!TypeSize.has_value())
-        llvm::errs() << "unable to determine type size\n";
-    }
-    if (TypeSize.has_value() && IsSigned.has_value()) {
-      llvm::errs() << "found type size and signedness\n";
-    }
+    // std::optional<unsigned> TypeSize = std::nullopt;
+    // std::optional<bool> IsSigned = std::nullopt;
+    // if (const auto *Int = dyn_cast<ConstantInt>(Val)) {
+    //   llvm::errs() << "arg is a constant, using that type\n";
+    //   TypeSize = Int->getBitWidth();
+    // } else if (const auto *ZEI = dyn_cast<ZExtInst>(Val)) {
+    //   IsSigned = false;
+    //   llvm::errs() << "determined type is unsigned from zext instruction\n";
+    //   TypeSize = ZEI->getSrcTy()->getIntegerBitWidth();
+    //   llvm::errs() << "using source type with width " << TypeSize.value()
+    //                << "\n";
+    // } else if (const auto *SEI = dyn_cast<SExtInst>(Val)) {
+    //   IsSigned = true;
+    //   llvm::errs() << "determined type is signed from sext instruction\n";
+    //   TypeSize = SEI->getSrcTy()->getIntegerBitWidth();
+    //   llvm::errs() << "using source type with width " << TypeSize.value()
+    //                << "\n";
+    // } else {
+    //   llvm::errs() << "determining type based on debug info\n";
+    //   SmallVector<DbgVariableIntrinsic *> DbgUsers;
+    //   findDbgUsers(DbgUsers, Val);
+    //   llvm::errs() << "point 1\n";
+    //   // TODO: Multiple dbg values? Why in a loop, use just the last one?
+    //   for (const auto *User : llvm::reverse(DbgUsers)) {
+    //     llvm::errs() << "point 2\n";
+    //     DILocalVariable *Var = User->getVariable();
+    //     Var->getType()->print(llvm::errs(), CI->getModule(), true);
+    //     Var->getRawType()->print(llvm::errs(), CI->getModule(), true);
+    //     llvm::errs() << "type size is " << Var->getSizeInBits().value_or(0)
+    //                  << " bits\n";
+    //     llvm::errs() << "type signedness is "
+    //                  << (Var->getSignedness().has_value()
+    //                          ? -1
+    //                          : (int)Var->getSignedness().value())
+    //                  << "(Unknown, Signed, Unsigned)\n";
+    //     if (Var->getSignedness().has_value())
+    //       IsSigned = Var->getSignedness() == DIBasicType::Signedness::Signed;
+    //     if (Var->getSizeInBits())
+    //       TypeSize = Var->getSizeInBits().value();
+    //     if (IsSigned && TypeSize)
+    //       break;
+    //   }
+    //   if (!IsSigned.has_value())
+    //     llvm::errs() << "unable to determine is type signed\n";
+    //   if (!TypeSize.has_value())
+    //     llvm::errs() << "unable to determine type size\n";
+    // }
+    // if (TypeSize.has_value() && IsSigned.has_value()) {
+    //   llvm::errs() << "found type size and signedness\n";
+    // }
 
-    unsigned ModifierSize;
-    bool ModifierSigned;
-    switch (Dir.Modifier) {
-    case FormatDirective::Modifiers::NONE:
-      ModifierSize = 32;
-      ModifierSigned = (Dir.Specifier == 'd' || Dir.Specifier == 'i');
-      break;
-    case FormatDirective::Modifiers::z:
-      ModifierSize = 64;
-      ModifierSigned = false;
-      break;
-    default:
-      llvm::errs() << "Modifier '" << Dir.Modifier << "'\n";
-      assert(false && "Modifier not implemented");
-      break;
-    }
+    // unsigned ModifierSize;
+    // bool ModifierSigned;
+    // switch (Dir.Modifier) {
+    // case FormatDirective::Modifiers::NONE:
+    //   ModifierSize = 32;
+    //   ModifierSigned = (Dir.Specifier == 'd' || Dir.Specifier == 'i');
+    //   break;
+    // case FormatDirective::Modifiers::z:
+    //   ModifierSize = 64;
+    //   ModifierSigned = false;
+    //   break;
+    // default:
+    //   llvm::errs() << "Modifier '" << Dir.Modifier << "'\n";
+    //   assert(false && "Modifier not implemented");
+    //   break;
+    // }
 
     // Try to evaluate this number.
     ConstantRange ArgRange = LVI.getConstantRange(Val, CI, false);
@@ -523,8 +501,7 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
           ArgRange.getLower().getSExtValue() == 0 &&
           !((Base == 8 && Dir.FlagHash) || MaybeSign))
         ArgSize = 0;
-      DirRes.Range.Min = DirRes.Range.Max = DirRes.Range.Likely =
-          DirRes.Range.Unlikely = ArgSize;
+      DirRes.Range = {ArgSize};
       DirRes.KnownRange = true;
       llvm::errs() << "Adding const int with min value "
                    << ArgRange.getSignedMin() << " and size " << ArgSize
@@ -533,15 +510,10 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
       unsigned MinArgSize =
           getConstantLength(ArgRange.getLower().getSExtValue(), Base,
                             Dir.Precision, MaybeSign, MaybeBase);
-      unsigned MaxArgSize =
-          getConstantLength(ArgRange.getUpper().getSExtValue(), Base,
-                            Dir.Precision, MaybeSign, MaybeBase);
       DirRes.Range.Min = DirRes.Range.Likely = MinArgSize;
-      DirRes.Range.Max = DirRes.Range.Unlikely = MaxArgSize;
       llvm::errs() << "Adding range int with min value "
                    << ArgRange.getSignedMin() << " size " << MinArgSize
-                   << " max value " << ArgRange.getSignedMax() << " and size "
-                   << MaxArgSize << "\n";
+                   << " max value " << ArgRange.getSignedMax() << "\n";
     }
   }
 
@@ -583,7 +555,7 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
 
     bool Found = false;
     bool Valid = true;
-    size_t CurrentLen = 0;
+    size_t CurrentLen = std::numeric_limits<size_t>().max();
     llvm::errs() << "going through GEP uses\n";
     for (const auto &U : GEP->uses()) {
       llvm::errs() << "found use\n";
@@ -601,7 +573,7 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
         if (const auto *CI = dyn_cast<ConstantInt>(SI->getValueOperand())) {
           // memcpy can be optimized as an integer store. Treat the number as a
           // string.
-          CurrentLen = std::max<size_t>(CurrentLen, CI->getBitWidth() + 7 / 8);
+          CurrentLen = std::min<size_t>(CurrentLen, CI->getBitWidth() + 7 / 8);
         } else {
           llvm::errs() << "not a valid const. can't determine size\n";
           Valid = false;
@@ -612,7 +584,7 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
         // For memcpy find the argument that represents the number of chars to
         // copy.
         if (const auto *CI = dyn_cast<ConstantInt>(MCI->getLength())) {
-          CurrentLen = std::max<size_t>(CurrentLen, CI->getZExtValue());
+          CurrentLen = std::min<size_t>(CurrentLen, CI->getZExtValue());
         } else {
           llvm::errs() << "not a valid const. can't determine size\n";
           Valid = false;
@@ -637,7 +609,7 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
 
           StringRef Str;
           if (getConstantStringInfo(CI->getOperand(1), Str)) {
-            CurrentLen = Str.size();
+            CurrentLen = std::min(CurrentLen, Str.size());
             Valid = true;
           } else {
             llvm::errs() << "not a constant string\n";
@@ -646,7 +618,7 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
           }
         } else if (CallFunc == llvm::LibFunc_strncpy) {
           if (const auto *Len = dyn_cast<ConstantInt>(CI->getOperand(2))) {
-            CurrentLen = Len->getZExtValue();
+            CurrentLen = std::min(CurrentLen, Len->getZExtValue());
             Valid = true;
           } else {
             llvm::errs() << "length not a constant int\n";
@@ -677,10 +649,6 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
             std::min<long long>(Dir.Precision->second, DirRes.Range.Min);
         DirRes.Range.Likely =
             std::min<long long>(Dir.Precision->second, DirRes.Range.Likely);
-        DirRes.Range.Max =
-            std::min<long long>(Dir.Precision->second, DirRes.Range.Max);
-        DirRes.Range.Unlikely =
-            std::min<long long>(Dir.Precision->second, DirRes.Range.Unlikely);
       }
     } else {
       llvm::errs() << "unknown string length range, trying to use type size\n";
@@ -698,10 +666,6 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
               std::min<long long>(Dir.Precision->second, DirRes.Range.Min);
           DirRes.Range.Likely =
               std::min<long long>(Dir.Precision->second, DirRes.Range.Likely);
-          DirRes.Range.Max =
-              std::min<long long>(Dir.Precision->second, DirRes.Range.Max);
-          DirRes.Range.Unlikely =
-              std::min<long long>(Dir.Precision->second, DirRes.Range.Unlikely);
         }
         DirRes.Range.Min = 0;
       } else {
@@ -730,10 +694,6 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
             std::min<long long>(Dir.Precision->second, DirRes.Range.Min);
         DirRes.Range.Likely =
             std::min<long long>(Dir.Precision->second, DirRes.Range.Likely);
-        DirRes.Range.Max =
-            std::min<long long>(Dir.Precision->second, DirRes.Range.Max);
-        DirRes.Range.Unlikely =
-            std::min<long long>(Dir.Precision->second, DirRes.Range.Unlikely);
       }
     }
   }
@@ -751,127 +711,97 @@ static FormatResult formatFloat(const FormatDirective &Dir, CallInst *CI,
     return DirRes;
   }
 
-  Type *Ty;
-  switch (Dir.Modifier) {
-  case FormatDirective::NONE:
-    llvm::errs() << "using float type based on modifier\n";
-    Ty = Type::getFloatTy(CI->getContext());
-    break;
-  case FormatDirective::l:
-    llvm::errs() << "using double type based on modifier\n";
-    Ty = Type::getDoubleTy(CI->getContext());
-    break;
-  default:
-    assert(false && "not yet implemented");
-  }
+  // Type *Ty;
+  // switch (Dir.Modifier) {
+  // case FormatDirective::NONE:
+  //   llvm::errs() << "using float type based on modifier\n";
+  //   Ty = Type::getFloatTy(CI->getContext());
+  //   break;
+  // case FormatDirective::l:
+  //   llvm::errs() << "using double type based on modifier\n";
+  //   Ty = Type::getDoubleTy(CI->getContext());
+  //   break;
+  // default:
+  //   assert(false && "not yet implemented");
+  // }
 
-  std::pair<int, int> EffectivePrecision = {6, 6};
+  std::pair<unsigned, unsigned> EffectivePrecision = {6, 6};
   bool IsPrecDefault = false;
   if (!Dir.Precision) {
     llvm::errs() << "precision not specified, using 6 as default\n";
     EffectivePrecision = {6, 6}; // Default precision is 6
     IsPrecDefault = true;
   } else {
-    // TODO: This is supposed to be when the lower bound is negative(unknown)
-    // otherwise min is 0 and max is at least 6
-    // Dir.Precision = {0, std::max<unsigned>(Dir.Precision->first, 6)};
-    // llvm::errs() << "precision specified and constrained to 0-" <<
-    // Dir.Precision->first << "\n";
     EffectivePrecision = *Dir.Precision;
     llvm::errs() << "using set precision " << EffectivePrecision.first << "-"
                  << EffectivePrecision.second << "\n";
   }
 
-  if (CurrentArg >= CI->getNumOperands() ||
-      !isa<ConstantFP>(CI->getArgOperand(CurrentArg))) {
-    // If the argument is not a constant get the range using the type bounds
-    llvm::errs()
-        << "operand not found. should default to type based estimate\n";
-    assert(false && "not yet implemented");
+  // If the argument is not a constant, there are no useful checks to be done.
+  if (const auto *CFP = dyn_cast<ConstantFP>(CI->getArgOperand(CurrentArg));
+      CFP && (CFP->isInfinity() || CFP->isNaN())) {
+    // The argument is a constant inf or nan.
+    llvm::errs() << "constant is inf or nan\n";
+    bool HasSign = Dir.FlagPlus || CFP->isNegative();
+    DirRes.Range.Min = StringRef("inf").size() + HasSign;
+    DirRes.Range.Likely = DirRes.Range.Min;
+    llvm::errs() << "setting range to " << DirRes.Range.Min << "\n";
+
+    // Adjust the range for width but ignore precision.
+    if (Dir.Width)
+      DirRes.adjust(Dir.Width->first, Dir.Width->second, nullptr, 0, 0);
   } else {
-    // The arg is a constant
-    llvm::errs() << "argument is a constant FP number\n";
-    const auto *CFP = dyn_cast<ConstantFP>(CI->getArgOperand(CurrentArg));
-    if (CFP->isInfinity() || CFP->isNaN()) {
-      llvm::errs() << "constant is inf or nan\n";
-      bool HasSign = Dir.FlagPlus || CFP->isNegative();
-      DirRes.Range.Min = StringRef("inf").size() + HasSign;
-      DirRes.Range.Likely = DirRes.Range.Min;
-      DirRes.Range.Max = DirRes.Range.Min;
-      DirRes.Range.Unlikely =
-          HasSign + (CFP->isInfinity() ? StringRef("infinity").size()
-                                       : StringRef("qnan").size());
+    // Estimate length based on specifier, width and precision.
+    llvm::errs() << "estimating based on specifier\n";
+    // We have no idea what the range is, set the minimum according to the
+    // specifier and precision. Precision is guaranteed to be initialized
+    // here
+    bool HasRadix =
+        EffectivePrecision.first > 0; // For the radix if precision is not 0
 
-      /* The range for infinity and NaN is known unless either width
-  or precision is unknown.  Width has the same effect regardless
-  of whether the argument is finite.  Precision is either ignored
-  (e.g., Glibc) or can have an effect on the short vs long format
-  such as inf/infinity (e.g., Solaris).  */
-      DirRes.KnownRange = Dir.Width && Dir.Precision;
-      llvm::errs() << "setting range to " << DirRes.Range.Min << "\n";
+    DirRes.Range.Min = EffectivePrecision.first + HasRadix +
+                       1; // there is always a digit before the radix
+    DirRes.Range.Likely = EffectivePrecision.first + HasRadix + 1;
+    llvm::errs() << "current hasRadix " << HasRadix << " min "
+                 << DirRes.Range.Min << " likely " << DirRes.Range.Likely
+                 << "\n";
 
-      /* Adjust the range for width but ignore precision.  */
-      if (Dir.Width)
-        DirRes.adjust(Dir.Width->first, Dir.Width->second, nullptr, 0, 0);
-    } else {
-      llvm::errs() << "constant is a number\n";
-      // Not inf or nan, it is an actual number
-      // we do not try to print out the number, only take width and precision
-      // into consideration
-      if (Dir.Width) {
-        DirRes.Range.Min = DirRes.Range.Likely = Dir.Width->first;
-        DirRes.Range.Max = DirRes.Range.Unlikely = 100; // TODO: Fix
-        llvm::errs() << "limited min by the width " << DirRes.Range.Min << "\n";
-      } else {
-        // we have no idea what the range is, set the minimum according to the
-        // specifier and precision precision is guaranteed to be initialized
-        // here
-        bool HasRadix =
-            EffectivePrecision.first > 0; // For the . if precision is not 0
-
-        DirRes.Range.Min = EffectivePrecision.first + HasRadix +
-                           1; // there is always a digit before the .
-        DirRes.Range.Likely = EffectivePrecision.first + HasRadix + 1;
-        llvm::errs() << "current hasRadix " << HasRadix << " min "
-                     << DirRes.Range.Min << " likely " << DirRes.Range.Likely
-                     << "\n";
-
-        if (Dir.Specifier == 'f' || Dir.Specifier == 'F') {
-          // NOOP nothing we can do here
-          // TODO: Possibly use the integer value to get a minimum
-          // approximation. CFP->getValue().convertToInteger()
-          llvm::errs() << "setting F range to " << DirRes.Range.Min << "\n";
-        } else if (Dir.Specifier == 'e' || Dir.Specifier == 'E') {
-          // 1.000000e-01
-          // 0.000000e+00
-          DirRes.Range.Min += 4; // for e+00
-          DirRes.Range.Likely += 4;
-          llvm::errs() << "setting E to " << DirRes.Range.Min << "\n";
-        } else if (Dir.Specifier == 'a' || Dir.Specifier == 'A') {
-          // 0x1p+2
-          // 0x1.2p+2
-          // 0x1.47ae147ae147bp-8
-          // Here default precision of 6 doesn't seem to take effect
-          if (IsPrecDefault) {
-            // Reset if precision is not explicitly specified
-            // HasRadix is not effective if the precision is default
-            llvm::errs() << "reset default precision\n";
-            DirRes.Range.Min = 1;
-            DirRes.Range.Likely = 1;
-          }
-          unsigned Min = 5; // for 0x and p+2
-          DirRes.Range.Min += Min;
-          DirRes.Range.Likely += Min;
-          llvm::errs() << "setting A range to " << DirRes.Range.Min << "\n";
-        } else {
-          // TODO: Support g/G
-          assert(false && "this float specifier is not yet supported");
-        }
-
-        // TODO: Fix. This is hardcoded
-        DirRes.Range.Max = DirRes.Range.Unlikely = 100;
+    if (Dir.Specifier == 'f' || Dir.Specifier == 'F') {
+      // NOOP nothing we can do here
+      // TODO: Possibly use the integer value to get a minimum
+      // approximation.
+      // CFP->getValue().convertToInteger()
+      llvm::errs() << "setting F range to " << DirRes.Range.Min << "\n";
+    } else if (Dir.Specifier == 'e' || Dir.Specifier == 'E') {
+      // Examples: 1.000000e-01, 0.000000e+00
+      DirRes.Range.Min += 4; // for e+00
+      DirRes.Range.Likely += 4;
+      llvm::errs() << "setting E to " << DirRes.Range.Min << "\n";
+    } else if (Dir.Specifier == 'a' || Dir.Specifier == 'A') {
+      // Examples: 0x1p+2, 0x1.2p+2, 0x1.47ae147ae147bp-8
+      // Here default precision of 6 doesn't take effect
+      if (IsPrecDefault) {
+        // Reset if precision is not explicitly specified
+        // HasRadix is not effective if the precision is default
+        llvm::errs() << "reset default precision\n";
+        DirRes.Range.Min = 1;
+        DirRes.Range.Likely = 1;
       }
+      unsigned Min = 5; // for 0x and p+0
+      DirRes.Range.Min += Min;
+      DirRes.Range.Likely += Min;
+      llvm::errs() << "setting A range to " << DirRes.Range.Min << "\n";
+    } else if (Dir.Specifier == 'g' || Dir.Specifier == 'G') {
+      DirRes.Range.Min = 1;
+      DirRes.Range.Likely = 1;
+    } else {
+      assert(false && "this float specifier is not yet supported");
+      DirRes.Range.Min = 1;
+      DirRes.Range.Likely = 1;
     }
+    // Adjust the range for width but ignore precision.
+    if (Dir.Width)
+      DirRes.adjust(Dir.Width->first, Dir.Width->second, nullptr, 0, 0);
   }
 
   DirRes.KnownRange = true;
@@ -1014,10 +944,10 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           case 'c': {
             llvm::errs() << "formatting %c for arg " << CurrentArg << "\n";
             if (Dir.Modifier == FormatDirective::l) {
-              // Wide characters can be up to 6 bytes long.
+              // Wide characters can be up to 6 bytes long, but it is likely 2
+              // bytes.
               DirRes.Range.Min = 1;
               DirRes.Range.Likely = 2;
-              DirRes.Range.Max = DirRes.Range.Unlikely = 6;
             } else {
               // Regular characters are 1 byte long.
               DirRes.Range = {1};
@@ -1049,7 +979,6 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
               } else if (PtrSize == 64) {
                 llvm::errs() << "64bit pointer has size 14, max 18\n";
                 DirRes.Range = {14};
-                DirRes.Range.Max = DirRes.Range.Unlikely = 18;
               } else {
                 llvm::errs() << "unknown range for pointer of size " << PtrSize
                              << ", estimating 0\n";
@@ -1107,18 +1036,6 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
                        << " dest size " << DestSize << " "
                        << " current res likely " << Res.Range.Likely << "\n";
 
-          if (Res.Range.Max < std::numeric_limits<int>().max() &&
-              DirRes.Range.Max < std::numeric_limits<int>().max()) {
-            Res.Range.Max += DirRes.Range.Max;
-          }
-
-          // TODO: Overflow check.
-          if (DirRes.Range.Max < DirRes.Range.Unlikely) {
-            Res.Range.Unlikely += DirRes.Range.Unlikely;
-          } else {
-            Res.Range.Unlikely += DirRes.Range.Max;
-          }
-
           Res.Range.Min += DirRes.Range.Min;
           Res.Range.Likely += DirRes.Range.Likely;
 
@@ -1137,8 +1054,7 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
         // correct estimate for the minimum length.
         if (Res.Range.Likely > DestSize) {
           llvm::errs() << "Output will be truncated. Writing min "
-                       << Res.Range.Min << " max " << Res.Range.Max
-                       << " likely " << Res.Range.Likely
+                       << Res.Range.Min << " likely " << Res.Range.Likely
                        << " into buffer of destination " << DestSize;
 
           F.getContext().diagnose(DiagnosticInfoFormatStringBounds(

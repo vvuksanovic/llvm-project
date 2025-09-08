@@ -117,4 +117,8 @@ void test() {
   snprintf(dest, 7, "%a", 0x1.0p2); 
   //                                                  // prints 0x1p+3
 
+  snprintf(dest, 5, "%*d", 5, 1); // expected-warning {{'snprintf' will always be truncated}}
+
+  unsigned Width = bool1 ? 5 : 10;
+  snprintf(dest, 5, "%*d", Width, 1); // expected-warning {{'snprintf' will always be truncated}}
 }
