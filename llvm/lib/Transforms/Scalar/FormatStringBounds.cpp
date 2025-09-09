@@ -1,5 +1,8 @@
 #include "llvm/Transforms/Scalar/FormatStringBounds.h"
 
+#include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/APSInt.h"
+#include "llvm/ADT/FloatingPointMode.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/LazyValueInfo.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -303,10 +306,7 @@ public:
   FormatResult() : MinLength(0), KnownRange(false) {}
 
   void adjust(std::optional<long long> AdjMin);
-  void increment(unsigned Val = 1);
 };
-
-void FormatResult::increment(unsigned Val) { MinLength += Val; }
 
 void FormatResult::adjust(std::optional<long long> AdjMin) {
   if (AdjMin && MinLength < AdjMin) {
@@ -320,13 +320,13 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
 
   bool MaybeBase = Dir.FlagHash;
   bool MaybeSign = false;
-  bool Sign = false;
+  // bool Sign = false;
   unsigned Base;
 
   if (Dir.Specifier == 'd' || Dir.Specifier == 'i') {
     Base = 10;
     MaybeSign = Dir.FlagSpace || Dir.FlagPlus;
-    Sign = true;
+    // Sign = true;
   } else if (Dir.Specifier == 'x' || Dir.Specifier == 'X')
     Base = 16;
   else if (Dir.Specifier == 'o') {
@@ -335,14 +335,14 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
     llvm_unreachable("Unsupported numeric specifier");
   }
 
-  Type *T;
+  // Type *T;
   if (CurrentArg >= CI->getNumOperands()) {
     // Argument not provided, assume it is one byte long.
     DirRes.MinLength = 1;
   } else {
     Value *Val = CI->getArgOperand(CurrentArg);
-    Type *ArgType = Val->getType();
-    T = ArgType;
+    // Type *ArgType = Val->getType();
+    // T = ArgType;
 
     llvm::errs() << "Found arg\n";
     Val->print(llvm::errs());
@@ -532,7 +532,6 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
           break;
         }
         if (CallFunc == llvm::LibFunc_strcpy) {
-          // TODO: Also implement strncpy.
           llvm::errs() << "found strcpy inst\n";
           llvm::errs() << "source operand type:\n";
           CI->getOperand(1)->getType()->print(llvm::errs(), true);
@@ -631,86 +630,141 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
 static FormatResult formatFloat(const FormatDirective &Dir, CallInst *CI,
                                 unsigned CurrentArg) {
   FormatResult DirRes;
+  DirRes.KnownRange = true;
 
-  if (CurrentArg >= CI->getNumOperands()) {
-    DirRes.MinLength = 0;
-    DirRes.KnownRange = false;
-    return DirRes;
+  unsigned MinIntLength = 1;
+  if (CurrentArg < CI->getNumOperands()) {
+    if (const auto *CFP = dyn_cast<ConstantFP>(CI->getArgOperand(CurrentArg))) {
+      if (CFP->isInfinity() || CFP->isNaN()) {
+        // The argument is a constant inf or nan.
+        bool HasSign = Dir.FlagPlus || CFP->isNegative();
+        DirRes.MinLength = StringRef("inf").size() + HasSign;
+        DirRes.KnownRange = false;
+
+        // Adjust the range for width but ignore precision.
+        if (Dir.Width) {
+          DirRes.adjust(Dir.Width->first);
+
+          // Is the width dictated by the width?
+          if (DirRes.MinLength > Dir.Width->first)
+            DirRes.KnownRange = false;
+        }
+
+        return DirRes;
+      }
+
+      // The argument is a constant number.
+      APSInt TruncatedOperand;
+      bool IsExact;
+      if (CFP->getValue().convertToInteger(TruncatedOperand,
+                                           RoundingMode::TowardZero,
+                                           &IsExact) == APFloatBase::opOK) {
+        auto IntVal = TruncatedOperand.getSExtValue();
+        MinIntLength = getConstantLength(IntVal, 10);
+        llvm::errs() << "Found " << MinIntLength
+                     << " digits before the radix\n";
+      } else {
+        llvm::errs() << "op failed\n";
+      }
+    }
   }
 
-  std::pair<unsigned, unsigned> EffectivePrecision = {6, 6};
-  bool IsPrecDefault = false;
-  if (!Dir.Precision) {
-    llvm::errs() << "precision not specified, using 6 as default\n";
-    EffectivePrecision = {6, 6}; // Default precision is 6
-    IsPrecDefault = true;
-  } else {
+  std::pair<unsigned, unsigned> EffectivePrecision;
+  if (Dir.Precision) {
     EffectivePrecision = *Dir.Precision;
     llvm::errs() << "using set precision " << EffectivePrecision.first << "-"
                  << EffectivePrecision.second << "\n";
-  }
-
-  // If the argument is not a constant, there are no useful checks to be done.
-  if (const auto *CFP = dyn_cast<ConstantFP>(CI->getArgOperand(CurrentArg));
-      CFP && (CFP->isInfinity() || CFP->isNaN())) {
-    // The argument is a constant inf or nan.
-    llvm::errs() << "constant is inf or nan\n";
-    bool HasSign = Dir.FlagPlus || CFP->isNegative();
-    DirRes.MinLength = StringRef("inf").size() + HasSign;
-    llvm::errs() << "setting range to " << DirRes.MinLength << "\n";
-
-    // Adjust the range for width but ignore precision.
-    if (Dir.Width)
-      DirRes.adjust(Dir.Width->first);
+  } else if (llvm::toUpper(Dir.Specifier) == 'A') {
+    llvm::errs() << "precision not specified, using 1 as default\n";
+    // Default precision for %a is 0.
+    EffectivePrecision = {0, 0};
   } else {
-    // Estimate length based on specifier, width and precision.
-    llvm::errs() << "estimating based on specifier\n";
-    // We have no idea what the range is, set the minimum according to the
-    // specifier and precision. Precision is guaranteed to be initialized
-    // here
-    bool HasRadix =
-        EffectivePrecision.first > 0; // For the radix if precision is not 0
-
-    DirRes.MinLength = EffectivePrecision.first + HasRadix +
-                       1; // there is always a digit before the radix
-    llvm::errs() << "current hasRadix " << HasRadix << " min "
-                 << DirRes.MinLength << "\n";
-
-    if (Dir.Specifier == 'f' || Dir.Specifier == 'F') {
-      // NOOP nothing we can do here
-      // TODO: Possibly use the integer value to get a minimum
-      // approximation.
-      // CFP->getValue().convertToInteger()
-      llvm::errs() << "setting F range to " << DirRes.MinLength << "\n";
-    } else if (Dir.Specifier == 'e' || Dir.Specifier == 'E') {
-      // Examples: 1.000000e-01, 0.000000e+00
-      DirRes.MinLength += 4; // for e+00
-      llvm::errs() << "setting E to " << DirRes.MinLength << "\n";
-    } else if (Dir.Specifier == 'a' || Dir.Specifier == 'A') {
-      // Examples: 0x1p+2, 0x1.2p+2, 0x1.47ae147ae147bp-8
-      // Here default precision of 6 doesn't take effect
-      if (IsPrecDefault) {
-        // Reset if precision is not explicitly specified
-        // HasRadix is not effective if the precision is default
-        llvm::errs() << "reset default precision\n";
-        DirRes.MinLength = 1;
-      }
-      unsigned Min = 5; // for 0x and p+0
-      DirRes.MinLength += Min;
-      llvm::errs() << "setting A range to " << DirRes.MinLength << "\n";
-    } else if (Dir.Specifier == 'g' || Dir.Specifier == 'G') {
-      DirRes.MinLength = 1;
-    } else {
-      assert(false && "Unknown float specifier");
-      DirRes.MinLength = 1;
-    }
-
-    // Adjust the range for width but ignore precision.
-    if (Dir.Width)
-      DirRes.adjust(Dir.Width->first);
+    llvm::errs() << "precision not specified, using 6 as default\n";
+    // Default precision for other specifiers is 6.
+    EffectivePrecision = {6, 6};
   }
 
-  DirRes.KnownRange = true;
+  // Estimate length based on specifier, width and precision.
+  llvm::errs() << "estimating based on specifier\n";
+  // We have no idea what the range is, set the minimum according to the
+  // specifier and precision. Precision is guaranteed to be initialized
+  // here
+  bool HasRadix =
+      EffectivePrecision.first > 0; // For the radix if precision is not 0
+
+  DirRes.MinLength = EffectivePrecision.first + HasRadix +
+                     1; // there is always a digit before the radix
+  llvm::errs() << "current hasRadix " << HasRadix << " min " << DirRes.MinLength
+               << "\n";
+
+  if (Dir.Specifier == 'f' || Dir.Specifier == 'F') {
+    // Use the integer value to get number of digits before the radix. One digit
+    // is already included by default.
+    DirRes.MinLength += MinIntLength - 1;
+    if (MinIntLength > 1)
+      DirRes.KnownRange = false;
+    llvm::errs() << "setting F range to " << DirRes.MinLength << "\n";
+  } else if (Dir.Specifier == 'e' || Dir.Specifier == 'E') {
+    // Examples: 1.000000e-01, 0.000000e+00
+    DirRes.MinLength += 4; // for e+00
+    llvm::errs() << "setting E to " << DirRes.MinLength << "\n";
+  } else if (Dir.Specifier == 'a' || Dir.Specifier == 'A') {
+    // Examples: 0x1p+2, 0x1.2p+2, 0x1.47ae147ae147bp-8
+    DirRes.MinLength += 5; // for 0x and p+0
+    llvm::errs() << "setting A range to " << DirRes.MinLength << "\n";
+  } else if (Dir.Specifier == 'g' || Dir.Specifier == 'G') {
+    DirRes.MinLength = 1;
+  } else {
+    assert(false && "Unknown float specifier");
+    DirRes.MinLength = 1;
+  }
+
+  // Adjust the range for width but ignore precision.
+  if (Dir.Width) {
+    DirRes.adjust(Dir.Width->first);
+
+    // Is the width dictated by the width?
+    if (DirRes.MinLength > Dir.Width->first)
+      DirRes.KnownRange = false;
+  }
+
+  return DirRes;
+}
+
+static FormatResult formatPointer(const FormatDirective &Dir, CallInst *CI,
+                                  unsigned CurrentArg) {
+  FormatResult DirRes;
+
+  // NOTE: Pointers printing is implementation and target defined.
+  // These are just estimates.
+  Value *Val = CI->getArgOperand(CurrentArg);
+  if (isa<ConstantPointerNull>(Val)) {
+    llvm::errs() << "pointer is null const, using range 5\n";
+    // Null pointer prints "(nil)" in both clang and gcc.
+    DirRes.MinLength = StringRef("(nil)").size();
+    DirRes.KnownRange = false;
+  } else {
+    llvm::errs() << "pointer is not null, estimating based on size\n";
+    unsigned PtrSize =
+        CI->getFunction()->getDataLayout().getPointerSizeInBits(0);
+    if (PtrSize == 32) {
+      llvm::errs() << "32bit pointer has size 10\n";
+      DirRes.MinLength = 10;
+      DirRes.KnownRange = false;
+    } else if (PtrSize == 64) {
+      llvm::errs() << "64bit pointer has size 14, max 18\n";
+      DirRes.MinLength = 14;
+      DirRes.KnownRange = false;
+    } else {
+      llvm::errs() << "unknown range for pointer of size " << PtrSize
+                   << ", estimating 0\n";
+      // Don't estimate, treat as no characters are printed.
+      // Effectively don't consider this directive in the calculation.
+      DirRes.MinLength = 0;
+      DirRes.KnownRange = true;
+    }
+  }
+
   return DirRes;
 }
 
@@ -808,9 +862,6 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
         if (DestSize == 0)
           continue;
 
-        // TODO: Test DestSize is not greater than size_t/2 and int_max.
-        // TODO: Compute the dest buffer origin and determine the offset.
-
         llvm::errs() << "started formatting\n";
         FormatResult Res;
 
@@ -825,6 +876,7 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           llvm::errs() << "Parsed Directive with specifier '" << Dir.Specifier
                        << "' and length " << Dir.Length << "\n";
           if (Dir.Specifier == ' ' || Dir.Length == 0) {
+            // Invalid specifier. Do not continue.
             llvm::errs() << "error: bad specifier\n";
             break;
           }
@@ -836,18 +888,16 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           case 'u':
           case 'o':
           case 'x':
-          case 'X': {
+          case 'X':
             llvm::errs() << "formatting %" << Dir.Specifier << " for arg "
                          << CurrentArg << "\n";
             DirRes = formatInteger(Dir, CI, CurrentArg, LVI);
             break;
-          }
-          case 's': {
+          case 's':
             llvm::errs() << "formatting %s for arg " << CurrentArg << "\n";
             DirRes = formatString(Dir, CI, CurrentArg, TLI);
             break;
-          }
-          case 'c': {
+          case 'c':
             llvm::errs() << "formatting %c for arg " << CurrentArg << "\n";
             DirRes.MinLength = 1;
 
@@ -856,40 +906,10 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
 
             DirRes.KnownRange = true;
             break;
-          }
-          case 'p': {
+          case 'p':
             llvm::errs() << "formatting %p for arg " << CurrentArg << "\n";
-            // NOTE: Pointers printing is implementation and target defined.
-            // These are just estimates.
-            Value *Val = CI->getArgOperand(CurrentArg);
-            if (isa<ConstantPointerNull>(Val)) {
-              llvm::errs() << "pointer is null const, using range 5\n";
-              // Null pointer prints "(nil)" in both clang and gcc.
-              DirRes.MinLength = StringRef("(nil)").size();
-              DirRes.KnownRange = false;
-            } else {
-              llvm::errs() << "pointer is not null, estimating based on size\n";
-              unsigned PtrSize =
-                  CI->getFunction()->getDataLayout().getPointerSizeInBits(0);
-              if (PtrSize == 32) {
-                llvm::errs() << "32bit pointer has size 10\n";
-                DirRes.MinLength = 10;
-                DirRes.KnownRange = false;
-              } else if (PtrSize == 64) {
-                llvm::errs() << "64bit pointer has size 14, max 18\n";
-                DirRes.MinLength = 14;
-                DirRes.KnownRange = false;
-              } else {
-                llvm::errs() << "unknown range for pointer of size " << PtrSize
-                             << ", estimating 0\n";
-                // Don't estimate, treat as no characters are printed.
-                // Effectively don't consider this directive in the calculation.
-                DirRes.MinLength = 0;
-                DirRes.KnownRange = true;
-              }
-            }
+            DirRes = formatPointer(Dir, CI, CurrentArg);
             break;
-          }
           case 'f':
           case 'F':
           case 'e':
@@ -897,12 +917,11 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           case 'a':
           case 'A':
           case 'g':
-          case 'G': {
+          case 'G':
             llvm::errs() << "formatting %" << Dir.Specifier << " for arg "
                          << CurrentArg << "\n";
             DirRes = formatFloat(Dir, CI, CurrentArg);
             break;
-          }
           case '%': // Literal '%' char:
             llvm::errs() << "ignoring %s for arg " << CurrentArg << "\n";
             DirRes.MinLength = 1;
@@ -946,7 +965,7 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
         }
 
         // Add one for terminating nul.
-        Res.increment();
+        Res.MinLength++;
 
         // Emit the diagnostic after all directives are parsed so we know the
         // correct estimate for the minimum length.
