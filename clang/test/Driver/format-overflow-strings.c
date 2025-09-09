@@ -1,4 +1,4 @@
-// RUN: %clang -g -O1 -c -Wformat -mllvm -format-string-pass -mllvm -format-string-level=1 %s -Xclang -verify
+// RUN: %clang -g -O1 -c -Wformat %s -Xclang -verify
 
 typedef __SIZE_TYPE__ size_t;
 

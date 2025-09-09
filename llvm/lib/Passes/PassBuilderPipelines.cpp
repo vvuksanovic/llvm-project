@@ -303,13 +303,6 @@ static cl::opt<std::string> InstrumentColdFuncOnlyPath(
              "with --pgo-instrument-cold-function-only)"),
     cl::Hidden);
 
-static cl::opt<bool> RunFormatStringPass(
-    "format-string-pass", cl::init(false), cl::Hidden,
-    cl::desc("Run format string pass"));
-static cl::opt<int> FormatStringPassLevel(
-    "format-string-level", cl::init(1), cl::Hidden,
-    cl::desc("Level of the format string pass: 1 or 2"));
-
 extern cl::opt<std::string> UseCtxProfile;
 extern cl::opt<bool> PGOInstrumentColdFunctionOnly;
 
@@ -448,8 +441,6 @@ PassBuilder::buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
   // Form SSA out of local memory accesses after breaking apart aggregates into
   // scalars.
   FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
-
-  // FPM.addPass(FormatStringBoundsPass());
 
   // Catch trivial redundancies
   FPM.addPass(EarlyCSEPass(true /* Enable mem-ssa. */));
@@ -598,8 +589,6 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
   // Form SSA out of local memory accesses after breaking apart aggregates into
   // scalars.
   FPM.addPass(SROAPass(SROAOptions::ModifyCFG));
-
-  // FPM.addPass(FormatStringBoundsPass());
 
   // Catch trivial redundancies
   FPM.addPass(EarlyCSEPass(true /* Enable mem-ssa. */));
@@ -800,6 +789,8 @@ PassBuilder::buildFunctionSimplificationPipeline(OptimizationLevel Level,
                                   .sinkCommonInsts(true)));
   FPM.addPass(InstCombinePass());
   invokePeepholeEPCallbacks(FPM, Level);
+
+  FPM.addPass(FormatStringNullPass());
 
   return FPM;
 }
@@ -1143,7 +1134,6 @@ PassBuilder::buildModuleSimplificationPipeline(OptimizationLevel Level,
     EarlyFPM.addPass(SROAPass(SROAOptions::ModifyCFG));
     EarlyFPM.addPass(EarlyCSEPass());
 
-    // if (RunFormatStringPass && FormatStringPassLevel <= 1)
     EarlyFPM.addPass(FormatStringBoundsPass());
 
     if (Level == OptimizationLevel::O3)
