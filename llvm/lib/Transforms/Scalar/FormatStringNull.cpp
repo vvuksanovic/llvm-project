@@ -1,7 +1,7 @@
 #include "llvm/Transforms/Scalar/FormatStringNull.h"
 
 #include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/IR/Analysis.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"

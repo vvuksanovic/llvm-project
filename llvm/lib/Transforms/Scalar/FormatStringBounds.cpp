@@ -7,11 +7,8 @@
 #include "llvm/Analysis/LazyValueInfo.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/IR/Analysis.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
-#include "llvm/IR/DebugInfo.h"
-#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Instructions.h"
@@ -660,7 +657,7 @@ static FormatResult formatPointer(const FormatDirective &Dir, CallInst *CI,
   } else {
     llvm::errs() << "pointer is not null, estimating based on size\n";
     unsigned PtrSize =
-        CI->getFunction()->getDataLayout().getPointerSizeInBits(0);
+        CI->getModule()->getDataLayout().getPointerSizeInBits(0);
     if (PtrSize == 32) {
       llvm::errs() << "32bit pointer has size 10\n";
       DirRes.MinLength = 10;
