@@ -21,6 +21,8 @@
 #include <limits>
 #include <optional>
 
+#define DEBUG_TYPE "format-string-bounds"
+
 using namespace llvm;
 
 FormatStringBoundsPass::FormatStringBoundsPass(int Level) : Level(Level){};
@@ -29,9 +31,10 @@ static unsigned getConstantLength(
     long long Constant, unsigned Base,
     std::optional<std::pair<unsigned, unsigned>> Precision = std::nullopt,
     bool PlusFlag = false, bool Prefix = true) {
-  llvm::errs() << "getConstantLength constant " << Constant << " base " << Base
-               << " precision " << (Precision ? Precision->first : -1)
-               << " plus " << PlusFlag << " prefix " << Prefix << "\n";
+  LLVM_DEBUG(llvm::dbgs() << "getConstantLength constant " << Constant
+                          << " base " << Base << " precision "
+                          << (Precision ? Precision->first : -1) << " plus "
+                          << PlusFlag << " prefix " << Prefix << "\n");
   unsigned Length = 0;
   long long Value = Constant;
 
@@ -89,8 +92,8 @@ static unsigned parseIntegerLiteral(const char *&Val) {
 #define SPECIFIER_LITERAL '$'
 
 static FormatDirective getLiteralDirective(const char *Begin, const char *End) {
-  llvm::errs() << "literal directive '" << StringRef(Begin, End - Begin)
-               << "'\n";
+  LLVM_DEBUG(llvm::dbgs() << "literal directive '"
+                          << StringRef(Begin, End - Begin) << "'\n");
   FormatDirective Dir;
   Dir.BeginPos = Begin;
   Dir.Length = End - Begin;
@@ -116,11 +119,11 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
   const char *CharIt = Begin;
   ++CharIt; // Move from '%'
   if (CharIt >= FormatStr.end()) {
-    llvm::errs() << "Invalid directive 1\n";
+    LLVM_DEBUG(llvm::dbgs() << "Invalid directive 1\n");
     return getLiteralDirective(DirectiveStart, CharIt);
   }
 
-  llvm::errs() << "found directive\n";
+  LLVM_DEBUG(llvm::dbgs() << "found directive\n");
 
   // Interpret directive flags.
   while (CharIt != FormatStr.end()) {
@@ -154,7 +157,7 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
     break;
   }
   if (CharIt >= FormatStr.end()) {
-    llvm::errs() << "Invalid directive 2\n";
+    LLVM_DEBUG(llvm::dbgs() << "Invalid directive 2\n");
     return getLiteralDirective(DirectiveStart, CharIt);
   }
 
@@ -193,7 +196,7 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
     Dir.Width = {Width, Width};
   }
   if (CharIt >= FormatStr.end()) {
-    llvm::errs() << "Invalid directive 3\n";
+    LLVM_DEBUG(llvm::dbgs() << "Invalid directive 3\n");
     return getLiteralDirective(DirectiveStart, CharIt);
   }
 
@@ -214,7 +217,7 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
         if (ArgPrecisionConst) {
           // Break if this is negative, that is not a valid case.
           if (ArgPrecisionConst->isNegative()) {
-            llvm::errs() << "Invalid directive 4\n";
+            LLVM_DEBUG(llvm::dbgs() << "Invalid directive 4\n");
             return getLiteralDirective(DirectiveStart, CharIt);
           }
           auto ArgPrecision = ArgPrecisionConst->getZExtValue();
@@ -242,7 +245,7 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
     }
   }
   if (CharIt >= FormatStr.end()) {
-    llvm::errs() << "Invalid directive 5\n";
+    LLVM_DEBUG(llvm::dbgs() << "Invalid directive 5\n");
     return getLiteralDirective(DirectiveStart, CharIt);
   }
 
@@ -283,7 +286,7 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
   if (Dir.Modifier != FormatDirective::NONE)
     ++CharIt;
   if (CharIt >= FormatStr.end()) {
-    llvm::errs() << "Invalid directive 6\n";
+    LLVM_DEBUG(llvm::dbgs() << "Invalid directive 6\n");
     return getLiteralDirective(DirectiveStart, CharIt);
   }
 
@@ -337,16 +340,18 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
   } else {
     Value *Val = CI->getArgOperand(CurrentArg);
 
-    llvm::errs() << "Found arg\n";
-    Val->print(llvm::errs());
-    llvm::errs() << "\n";
+    LLVM_DEBUG(llvm::dbgs() << "Found arg\n");
+    LLVM_DEBUG(Val->print(llvm::dbgs()));
+    LLVM_DEBUG(llvm::dbgs() << "\n");
 
     // Try to evaluate this number.
     ConstantRange ArgRange = LVI.getConstantRange(Val, CI, false);
-    llvm::errs() << "determined range (u) " << ArgRange.getUnsignedMin() << " "
-                 << ArgRange.getUnsignedMax() << "\n";
-    llvm::errs() << "determined range (s) " << ArgRange.getSignedMin() << " "
-                 << ArgRange.getSignedMax() << "\n";
+    LLVM_DEBUG(llvm::dbgs()
+               << "determined range (u) " << ArgRange.getUnsignedMin() << " "
+               << ArgRange.getUnsignedMax() << "\n");
+    LLVM_DEBUG(llvm::dbgs()
+               << "determined range (s) " << ArgRange.getSignedMin() << " "
+               << ArgRange.getSignedMax() << "\n");
     if (ArgRange.isSingleElement()) {
       unsigned ArgSize =
           getConstantLength(ArgRange.getLower().getSExtValue(), Base,
@@ -359,9 +364,9 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
         ArgSize = 0;
       DirRes.MinLength = ArgSize;
       DirRes.OverBaseline = ArgSize - 1;
-      llvm::errs() << "Adding const int with min value "
-                   << ArgRange.getSignedMin() << " and size " << ArgSize
-                   << "\n";
+      LLVM_DEBUG(llvm::dbgs()
+                 << "Adding const int with min value "
+                 << ArgRange.getSignedMin() << " and size " << ArgSize << "\n");
     } else {
       auto RangeMin = ArgRange.getLower().getSExtValue();
       auto RangeMax = ArgRange.getUpper().getSExtValue();
@@ -375,21 +380,23 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
                                           MaybeSign, MaybeBase);
       DirRes.MinLength = MinLen;
       DirRes.OverBaseline = MinLen - 1;
-      llvm::errs() << "Adding range int with min value " << MinLenValue
-                   << " size " << MinLen << "\n";
+      LLVM_DEBUG(llvm::dbgs() << "Adding range int with min value "
+                              << MinLenValue << " size " << MinLen << "\n");
     }
   }
 
   if (Dir.Precision) {
-    llvm::errs() << "adjusting precision" << Dir.Precision.has_value() << "\n";
+    LLVM_DEBUG(llvm::dbgs()
+               << "adjusting precision" << Dir.Precision.has_value() << "\n");
     DirRes.adjust(Dir.Precision->first);
   }
   if (Dir.Width) {
-    llvm::errs() << "adjusting width " << Dir.Width.has_value() << "\n";
+    LLVM_DEBUG(llvm::dbgs()
+               << "adjusting width " << Dir.Width.has_value() << "\n");
     DirRes.adjust(Dir.Width->first);
   }
 
-  llvm::errs() << "adjustment finished\n";
+  LLVM_DEBUG(llvm::dbgs() << "adjustment finished\n");
 
   return DirRes;
 }
@@ -408,52 +415,55 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
   }
 
   Value *Val = CI->getArgOperand(CurrentArg);
-  Val->print(llvm::errs(), true);
-  llvm::errs() << "\n";
-  Val->getType()->print(llvm::errs(), true, false);
-  llvm::errs() << "\n";
+  LLVM_DEBUG(Val->print(llvm::dbgs(), true));
+  LLVM_DEBUG(llvm::dbgs() << "\n");
+  LLVM_DEBUG(Val->getType()->print(llvm::dbgs(), true, false));
+  LLVM_DEBUG(llvm::dbgs() << "\n");
 
   if (const GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(Val)) {
     // Estimate the length based on uses of this value.
-    GEP->getSourceElementType()->print(llvm::errs(), true);
-    llvm::errs() << "\n";
+    LLVM_DEBUG(GEP->getSourceElementType()->print(llvm::dbgs(), true));
+    LLVM_DEBUG(llvm::dbgs() << "\n");
 
     bool Found = false; // Was at least one use found.
     bool Valid = true;
     size_t CurrentLen = std::numeric_limits<size_t>().max();
-    llvm::errs() << "going through GEP uses\n";
+    LLVM_DEBUG(llvm::dbgs() << "going through GEP uses\n");
     for (const auto &U : GEP->uses()) {
-      llvm::errs() << "found use\n";
-      U.getUser()->print(llvm::errs(), true);
-      llvm::errs() << "\n";
+      LLVM_DEBUG(llvm::dbgs() << "found use\n");
+      LLVM_DEBUG(U.getUser()->print(llvm::dbgs(), true));
+      LLVM_DEBUG(llvm::dbgs() << "\n");
 
       // Skip this GEP and the printf call instruction.
       if (U.getUser() == CI || U.getUser() == GEP) {
-        llvm::errs() << "skipping use in the print call or gep itself\n";
+        LLVM_DEBUG(llvm::dbgs()
+                   << "skipping use in the print call or gep itself\n");
         continue;
       }
 
       Found = true;
       if (const auto *SI = dyn_cast<StoreInst>(U.getUser())) {
-        llvm::errs() << "found store inst\n";
+        LLVM_DEBUG(llvm::dbgs() << "found store inst\n");
         if (const auto *CI = dyn_cast<ConstantInt>(SI->getValueOperand())) {
           // memcpy can be optimized as an integer store. Treat the number as a
           // string.
           CurrentLen = std::min<size_t>(CurrentLen, CI->getBitWidth() + 7 / 8);
         } else {
           // Stored value is not a constant.
-          llvm::errs() << "not a valid const. can't determine size\n";
+          LLVM_DEBUG(llvm::dbgs()
+                     << "not a valid const. can't determine size\n");
           Valid = false;
           break;
         }
       } else if (const auto *MCI = dyn_cast<MemCpyInst>(U.getUser())) {
-        llvm::errs() << "found memcpy inst\n";
+        LLVM_DEBUG(llvm::dbgs() << "found memcpy inst\n");
         // For memcpy find the argument that represents the number of chars to
         // copy.
         if (const auto *CI = dyn_cast<ConstantInt>(MCI->getLength())) {
           CurrentLen = std::min<size_t>(CurrentLen, CI->getZExtValue());
         } else {
-          llvm::errs() << "not a valid const. can't determine size\n";
+          LLVM_DEBUG(llvm::dbgs()
+                     << "not a valid const. can't determine size\n");
           Valid = false;
           break;
         }
@@ -465,20 +475,20 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
           break;
         }
         if (CallFunc == llvm::LibFunc_strcpy) {
-          llvm::errs() << "found strcpy inst\n";
-          llvm::errs() << "source operand type:\n";
-          CI->getOperand(1)->getType()->print(llvm::errs(), true);
-          llvm::errs() << "\n";
-          llvm::errs() << "source operand:\n";
-          CI->getOperand(1)->print(llvm::errs(), true);
-          llvm::errs() << "\n";
+          LLVM_DEBUG(llvm::dbgs() << "found strcpy inst\n");
+          LLVM_DEBUG(llvm::dbgs() << "source operand type:\n");
+          LLVM_DEBUG(CI->getOperand(1)->getType()->print(llvm::dbgs(), true));
+          LLVM_DEBUG(llvm::dbgs() << "\n");
+          LLVM_DEBUG(llvm::dbgs() << "source operand:\n");
+          LLVM_DEBUG(CI->getOperand(1)->print(llvm::dbgs(), true));
+          LLVM_DEBUG(llvm::dbgs() << "\n");
 
           StringRef Str;
           if (getConstantStringInfo(CI->getOperand(1), Str)) {
             CurrentLen = std::min(CurrentLen, Str.size());
             // Valid = true;
           } else {
-            llvm::errs() << "not a constant string\n";
+            LLVM_DEBUG(llvm::dbgs() << "not a constant string\n");
             Valid = false;
             break;
           }
@@ -488,48 +498,51 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
             CurrentLen = std::min(CurrentLen, Len->getZExtValue());
             // Valid = true;
           } else {
-            llvm::errs() << "length not a constant int\n";
+            LLVM_DEBUG(llvm::dbgs() << "length not a constant int\n");
             Valid = false;
             break;
           }
         } else {
-          llvm::errs() << "Found unsupported call\n";
+          LLVM_DEBUG(llvm::dbgs() << "Found unsupported call\n");
           Valid = false;
           break;
         }
       } else {
-        llvm::errs() << "Found unsupported use\n";
+        LLVM_DEBUG(llvm::dbgs() << "Found unsupported use\n");
         Valid = false;
         break;
       }
     }
 
-    llvm::errs() << "done with uses\n";
+    LLVM_DEBUG(llvm::dbgs() << "done with uses\n");
     if (Found && Valid) {
-      llvm::errs() << "Setting range to " << CurrentLen << "\n";
+      LLVM_DEBUG(llvm::dbgs() << "Setting range to " << CurrentLen << "\n");
       DirRes.MinLength = DirRes.OverBaseline = CurrentLen;
     } else {
-      llvm::errs() << "unknown string length range, trying to use type size\n";
+      LLVM_DEBUG(llvm::dbgs()
+                 << "unknown string length range, trying to use type size\n");
       if (GEP->getSourceElementType()->isArrayTy()) {
-        llvm::errs() << "found array type with n_elements "
-                     << GEP->getSourceElementType()->getArrayNumElements()
-                     << "\n";
+        LLVM_DEBUG(llvm::dbgs()
+                   << "found array type with n_elements "
+                   << GEP->getSourceElementType()->getArrayNumElements()
+                   << "\n");
         DirRes.MinLength = DirRes.OverBaseline =
             GEP->getSourceElementType()->getArrayNumElements();
       } else {
-        llvm::errs() << "unable to find estimate, assuming size 0\n";
+        LLVM_DEBUG(llvm::dbgs()
+                   << "unable to find estimate, assuming size 0\n");
         DirRes.MinLength = DirRes.OverBaseline = 0;
       }
     }
   } else {
-    llvm::errs() << "not a GEP instr\n";
+    LLVM_DEBUG(llvm::dbgs() << "not a GEP instr\n");
     StringRef ConstStr;
     bool Found = getConstantStringInfo(Val, ConstStr);
     if (Found) {
       // For constant string we know the exact length
       DirRes.MinLength = DirRes.OverBaseline = ConstStr.size();
     } else {
-      llvm::errs() << "not a constant string\n";
+      LLVM_DEBUG(llvm::dbgs() << "not a constant string\n");
       // Cannot estimate string length. Set to 0.
       // TODO: Try to follow memcpys.
       DirRes.MinLength = DirRes.OverBaseline = 0;
@@ -577,10 +590,10 @@ static FormatResult formatFloat(const FormatDirective &Dir, CallInst *CI,
                                            &IsExact) == APFloatBase::opOK) {
         auto IntVal = TruncatedOperand.getSExtValue();
         MinIntLength = getConstantLength(IntVal, 10);
-        llvm::errs() << "Found " << MinIntLength
-                     << " digits before the radix\n";
+        LLVM_DEBUG(llvm::dbgs()
+                   << "Found " << MinIntLength << " digits before the radix\n");
       } else {
-        llvm::errs() << "op failed\n";
+        LLVM_DEBUG(llvm::dbgs() << "op failed\n");
       }
     }
   }
@@ -588,20 +601,21 @@ static FormatResult formatFloat(const FormatDirective &Dir, CallInst *CI,
   std::pair<unsigned, unsigned> EffectivePrecision;
   if (Dir.Precision) {
     EffectivePrecision = *Dir.Precision;
-    llvm::errs() << "using set precision " << EffectivePrecision.first << "-"
-                 << EffectivePrecision.second << "\n";
+    LLVM_DEBUG(llvm::dbgs()
+               << "using set precision " << EffectivePrecision.first << "-"
+               << EffectivePrecision.second << "\n");
   } else if (llvm::toUpper(Dir.Specifier) == 'A') {
-    llvm::errs() << "precision not specified, using 1 as default\n";
+    LLVM_DEBUG(llvm::dbgs() << "precision not specified, using 1 as default\n");
     // Default precision for %a is 0.
     EffectivePrecision = {0, 0};
   } else {
-    llvm::errs() << "precision not specified, using 6 as default\n";
+    LLVM_DEBUG(llvm::dbgs() << "precision not specified, using 6 as default\n");
     // Default precision for other specifiers is 6.
     EffectivePrecision = {6, 6};
   }
 
   // Estimate length based on specifier, width and precision.
-  llvm::errs() << "estimating based on specifier\n";
+  LLVM_DEBUG(llvm::dbgs() << "estimating based on specifier\n");
   // We have no idea what the range is, set the minimum according to the
   // specifier and precision. Precision is guaranteed to be initialized
   // here
@@ -610,23 +624,25 @@ static FormatResult formatFloat(const FormatDirective &Dir, CallInst *CI,
 
   DirRes.MinLength = EffectivePrecision.first + HasRadix +
                      1; // there is always a digit before the radix
-  llvm::errs() << "current hasRadix " << HasRadix << " min " << DirRes.MinLength
-               << "\n";
+  LLVM_DEBUG(llvm::dbgs() << "current hasRadix " << HasRadix << " min "
+                          << DirRes.MinLength << "\n");
 
   if (Dir.Specifier == 'f' || Dir.Specifier == 'F') {
     // Use the integer value to get number of digits before the radix. One digit
     // is already included by default.
     DirRes.MinLength += MinIntLength - 1;
     DirRes.OverBaseline = MinIntLength - 1;
-    llvm::errs() << "setting F range to " << DirRes.MinLength << "\n";
+    LLVM_DEBUG(llvm::dbgs()
+               << "setting F range to " << DirRes.MinLength << "\n");
   } else if (Dir.Specifier == 'e' || Dir.Specifier == 'E') {
     // Examples: 1.000000e-01, 0.000000e+00
     DirRes.MinLength += 4; // for e+00
-    llvm::errs() << "setting E to " << DirRes.MinLength << "\n";
+    LLVM_DEBUG(llvm::dbgs() << "setting E to " << DirRes.MinLength << "\n");
   } else if (Dir.Specifier == 'a' || Dir.Specifier == 'A') {
     // Examples: 0x1p+2, 0x1.2p+2, 0x1.47ae147ae147bp-8
     DirRes.MinLength += 5; // for 0x and p+0
-    llvm::errs() << "setting A range to " << DirRes.MinLength << "\n";
+    LLVM_DEBUG(llvm::dbgs()
+               << "setting A range to " << DirRes.MinLength << "\n");
   } else if (Dir.Specifier == 'g' || Dir.Specifier == 'G') {
     DirRes.MinLength = 1;
   } else {
@@ -649,26 +665,26 @@ static FormatResult formatPointer(const FormatDirective &Dir, CallInst *CI,
   // These are just estimates.
   Value *Val = CI->getArgOperand(CurrentArg);
   if (isa<ConstantPointerNull>(Val)) {
-    llvm::errs() << "pointer is null const, using range 5\n";
+    LLVM_DEBUG(llvm::dbgs() << "pointer is null const, using range 5\n");
     // Null pointer prints "(nil)" in both clang and gcc.
     DirRes.MinLength = DirRes.OverBaseline = StringRef("(nil)").size();
     // Baseline only takes 0x into consideration.
     DirRes.OverBaseline = DirRes.MinLength - 2;
   } else {
-    llvm::errs() << "pointer is not null, estimating based on size\n";
-    unsigned PtrSize =
-        CI->getModule()->getDataLayout().getPointerSizeInBits(0);
+    LLVM_DEBUG(llvm::dbgs()
+               << "pointer is not null, estimating based on size\n");
+    unsigned PtrSize = CI->getModule()->getDataLayout().getPointerSizeInBits(0);
     if (PtrSize == 32) {
-      llvm::errs() << "32bit pointer has size 10\n";
+      LLVM_DEBUG(llvm::dbgs() << "32bit pointer has size 10\n");
       DirRes.MinLength = 10;
       DirRes.OverBaseline = DirRes.MinLength - 2;
     } else if (PtrSize == 64) {
-      llvm::errs() << "64bit pointer has size 14, max 18\n";
+      LLVM_DEBUG(llvm::dbgs() << "64bit pointer has size 14, max 18\n");
       DirRes.MinLength = 14;
       DirRes.OverBaseline = DirRes.MinLength - 2;
     } else {
-      llvm::errs() << "unknown range for pointer of size " << PtrSize
-                   << ", estimating 0\n";
+      LLVM_DEBUG(llvm::dbgs() << "unknown range for pointer of size " << PtrSize
+                              << ", estimating 0\n");
       // Don't estimate, treat as no characters are printed.
       // Effectively don't consider this directive in the calculation.
       DirRes.MinLength = 2;
@@ -726,10 +742,10 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           continue;
         }
 
-        llvm::errs() << "Found call to " << CI->getCalledFunction()->getName()
-                     << " with format idx: " << FormatStringIdx
-                     << ", dstptr: " << DestPtrIdx
-                     << ", dstsize: " << DestSizeIdx << "\n";
+        LLVM_DEBUG(llvm::dbgs()
+                   << "Found call to " << CI->getCalledFunction()->getName()
+                   << " with format idx: " << FormatStringIdx << ", dstptr: "
+                   << DestPtrIdx << ", dstsize: " << DestSizeIdx << "\n");
         CI->dump();
 
         assert(FormatStringIdx < CI->getNumOperands() &&
@@ -773,13 +789,13 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           Value *DestPtrValue = CI->getArgOperand(DestPtrIdx);
           DestSize = GetStringLength(DestPtrValue);
         }
-        llvm::errs() << "determined dest size " << DestSize << "\n";
+        LLVM_DEBUG(llvm::dbgs() << "determined dest size " << DestSize << "\n");
 
         // If we can't determine the size, there is no point in continuing.
         if (DestSize == 0)
           continue;
 
-        llvm::errs() << "started formatting\n";
+        LLVM_DEBUG(llvm::dbgs() << "started formatting\n");
         FormatResult Res;
 
         // Process the format directives and estimate the output size.
@@ -790,11 +806,12 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
 
           FormatDirective Dir =
               parseDirective(FormatStr, CharIt, CI, CurrentArg, LVI);
-          llvm::errs() << "Parsed Directive with specifier '" << Dir.Specifier
-                       << "' and length " << Dir.Length << "\n";
+          LLVM_DEBUG(llvm::dbgs()
+                     << "Parsed Directive with specifier '" << Dir.Specifier
+                     << "' and length " << Dir.Length << "\n");
           if (Dir.Specifier == ' ' || Dir.Length == 0) {
             // Invalid specifier. Do not continue.
-            llvm::errs() << "error: bad specifier\n";
+            LLVM_DEBUG(llvm::dbgs() << "error: bad specifier\n");
             break;
           }
           CharIt += Dir.Length;
@@ -806,16 +823,18 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           case 'o':
           case 'x':
           case 'X':
-            llvm::errs() << "formatting %" << Dir.Specifier << " for arg "
-                         << CurrentArg << "\n";
+            LLVM_DEBUG(llvm::dbgs() << "formatting %" << Dir.Specifier
+                                    << " for arg " << CurrentArg << "\n");
             DirRes = formatInteger(Dir, CI, CurrentArg, LVI);
             break;
           case 's':
-            llvm::errs() << "formatting %s for arg " << CurrentArg << "\n";
+            LLVM_DEBUG(llvm::dbgs()
+                       << "formatting %s for arg " << CurrentArg << "\n");
             DirRes = formatString(Dir, CI, CurrentArg, TLI);
             break;
           case 'c':
-            llvm::errs() << "formatting %c for arg " << CurrentArg << "\n";
+            LLVM_DEBUG(llvm::dbgs()
+                       << "formatting %c for arg " << CurrentArg << "\n");
             DirRes.MinLength = 1;
 
             if (Dir.Width)
@@ -823,7 +842,8 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
 
             break;
           case 'p':
-            llvm::errs() << "formatting %p for arg " << CurrentArg << "\n";
+            LLVM_DEBUG(llvm::dbgs()
+                       << "formatting %p for arg " << CurrentArg << "\n");
             DirRes = formatPointer(Dir, CI, CurrentArg);
             break;
           case 'f':
@@ -834,8 +854,8 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           case 'A':
           case 'g':
           case 'G':
-            llvm::errs() << "formatting %" << Dir.Specifier << " for arg "
-                         << CurrentArg << "\n";
+            LLVM_DEBUG(llvm::dbgs() << "formatting %" << Dir.Specifier
+                                    << " for arg " << CurrentArg << "\n");
             DirRes = formatFloat(Dir, CI, CurrentArg);
             break;
           case '%':
@@ -848,13 +868,15 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
             DirRes.MinLength = 0;
             break;
           case SPECIFIER_LITERAL:
-            llvm::errs() << "formatting literal '"
-                         << StringRef(Dir.BeginPos, Dir.Length) << "'\n";
+            LLVM_DEBUG(llvm::dbgs()
+                       << "formatting literal '"
+                       << StringRef(Dir.BeginPos, Dir.Length) << "'\n");
             DirRes.MinLength = Dir.Length;
             break;
 
           default:
-            llvm::errs() << "Unknown specifier '" << Dir.Specifier << "'\n";
+            LLVM_DEBUG(llvm::dbgs()
+                       << "Unknown specifier '" << Dir.Specifier << "'\n");
             assert(false && "Unknown specifier");
             continue;
           }
@@ -862,14 +884,15 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           // Update the total size based on the directive size.
           Res.OverBaseline += DirRes.OverBaseline;
 
-          llvm::errs() << "new directive min " << DirRes.MinLength
-                       << " dest size " << DestSize << " "
-                       << " current res min " << Res.MinLength << "\n";
+          LLVM_DEBUG(llvm::dbgs()
+                     << "new directive min " << DirRes.MinLength
+                     << " dest size " << DestSize << " " << " current res min "
+                     << Res.MinLength << "\n");
 
           Res.MinLength += DirRes.MinLength;
 
-          llvm::errs() << "That bring the current estimated size to "
-                       << Res.MinLength << "/" << DestSize << "\n";
+          LLVM_DEBUG(llvm::dbgs() << "That bring the current estimated size to "
+                                  << Res.MinLength << "/" << DestSize << "\n");
           // Increment the arg if this is not a literal from the format string
           if (Dir.Specifier != SPECIFIER_LITERAL && Dir.Specifier != '%')
             ++CurrentArg;
@@ -881,9 +904,10 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
         // Emit the diagnostic after all directives are parsed so we know the
         // correct estimate for the minimum length.
         if (Res.MinLength > DestSize) {
-          llvm::errs() << "Output will be truncated. Writing min "
-                       << Res.MinLength << " into buffer of destination "
-                       << DestSize << "\n";
+          LLVM_DEBUG(llvm::dbgs()
+                     << "Output will be truncated. Writing min "
+                     << Res.MinLength << " into buffer of destination "
+                     << DestSize << "\n");
 
           F.getContext().diagnose(DiagnosticInfoFormatStringBounds(
               F, CI->getDebugLoc(), CI->getCalledFunction()->getName(),

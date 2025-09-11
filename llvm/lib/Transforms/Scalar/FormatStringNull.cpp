@@ -16,7 +16,8 @@ PreservedAnalyses FormatStringNullPass::run(Function &F,
 
   for (auto &BB : F) {
     for (auto &Inst : BB) {
-      if (CallInst *CI = dyn_cast<CallInst>(&Inst)) {
+      CallInst *CI = dyn_cast<CallInst>(&Inst);
+      if (CI && CI->getCalledFunction()) {
         bool IsBounded;
         unsigned FormatStringIdx;
 
