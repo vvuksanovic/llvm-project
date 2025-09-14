@@ -3,12 +3,15 @@
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/FloatingPointMode.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Analysis/LazyValueInfo.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/ConstantRange.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfo.h"
+#include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Instructions.h"
@@ -18,6 +21,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 #include <limits>
 #include <optional>
 
@@ -315,6 +319,52 @@ void FormatResult::adjust(size_t AdjMin) {
   }
 }
 
+static DIType *getTypeFromDebugInfo(Function *F, Value *Val) {
+  if (isa<Constant>(Val))
+    return nullptr;
+
+  DIType *Type = nullptr;
+
+  // Check type of function arguments.
+  if (isa<Argument>(Val)) {
+    if (const DISubprogram *Subprogram = F->getSubprogram()) {
+      LLVM_DEBUG(Subprogram->dump(F->getParent()));
+      auto SubprogramType = Subprogram->getType()->getTypeArray();
+      unsigned ArgIdx = 1; // Ignore index 0. It is the return type.
+      for (Argument &Arg : F->args()) {
+        if (Val == &Arg) {
+          Type = SubprogramType[ArgIdx];
+        }
+        ++ArgIdx;
+      }
+    }
+  }
+
+  // Search old debug intrinsics for the type information.
+  SmallVector<DbgVariableIntrinsic *> DbgUsers;
+  findDbgUsers(DbgUsers, Val);
+  for (const auto *DbgInst : llvm::reverse(DbgUsers)) {
+    DILocalVariable *Var = DbgInst->getVariable();
+    if (!Var)
+      continue;
+    Type = Var->getType();
+    if (Type)
+      break;
+  }
+
+  // Search new debug records for the type information.
+  for (const auto *User : llvm::reverse(findDVRValues(Val))) {
+    DILocalVariable *Var = User->getVariable();
+    if (!Var)
+      continue;
+    Type = Var->getType();
+    if (Type)
+      break;
+  }
+
+  return Type;
+}
+
 static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
                                   unsigned CurrentArg, LazyValueInfo &LVI) {
   FormatResult DirRes;
@@ -344,44 +394,178 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
     LLVM_DEBUG(Val->print(llvm::dbgs()));
     LLVM_DEBUG(llvm::dbgs() << "\n");
 
-    // Try to evaluate this number.
-    ConstantRange ArgRange = LVI.getConstantRange(Val, CI, false);
-    LLVM_DEBUG(llvm::dbgs()
-               << "determined range (u) " << ArgRange.getUnsignedMin() << " "
-               << ArgRange.getUnsignedMax() << "\n");
-    LLVM_DEBUG(llvm::dbgs()
-               << "determined range (s) " << ArgRange.getSignedMin() << " "
-               << ArgRange.getSignedMax() << "\n");
-    if (ArgRange.isSingleElement()) {
-      unsigned ArgSize =
-          getConstantLength(ArgRange.getLower().getSExtValue(), Base,
-                            Dir.Precision, MaybeSign, MaybeBase);
-      // Special case: precision of 0 doesn't print the 0 constant.
+    // llvm::errs() << "checking function arguments\n";
+    // llvm::dbgs() << "is val an argument " <<  << "\n";
+
+    // !183 = distinct !DISubprogram(name: "print_enum_short_arg", scope: !2,
+    // file: !2, line: 91, type: !184, scopeLine: 91, flags: DIFlagPrototyped |
+    // DIFlagAllCallsDescribed, spFlags: DISPFlagDefinition | DISPFlagOptimized,
+    // unit: !75, retainedNodes: !186)
+    // !184 = !DISubroutineType(types: !185)
+    // !185 = !{null, !78}
+    // !78 = !DICompositeType(tag: DW_TAG_enumeration_type, name: "Short", file:
+    // !2, line: 87, baseType: !79, size: 32, elements: !80)
+    // !79 = !DIBasicType(name: "unsigned int", size: 32, encoding:
+    // DW_ATE_unsigned)
+    // !80 = !{!81, !82, !83} !81 = !DIEnumerator(name: "SHORT1", value: 0)
+    // !82 = !DIEnumerator(name: "SHORT2", value: 1)
+    // !83 = !DIEnumerator(name: "SHORT3", value: 2)
+
+    // Try to find if this is an enum type from debug info.
+    // DIType *Type = nullptr;
+    // if (isa<Argument>(Val)) {
+    //   // Check type of function arguments.
+    //   if (const DISubprogram *Subprogram =
+    //   CI->getFunction()->getSubprogram()) {
+    //     LLVM_DEBUG(Subprogram->dump(CI->getModule()));
+
+    //     // unsigned Idx = 1;
+    //     auto SubprogramArgTypes = Subprogram->getType()->getTypeArray();
+    //     Argument *Arg = llvm::find(CI->getFunction()->args(), Val);
+    //     auto ArgIdx = std::distance(CI->getFunction()->arg_begin(), Arg);
+    //     Type = SubprogramArgTypes[ArgIdx + 1]; // Ignore index 0. It is the
+    //     return type.
+
+    //     // for (auto &Arg : CI->getFunction()->args()) {
+    //     //   LLVM_DEBUG(llvm::dbgs() << "matching arg " << Arg << "\n");
+    //     //   if (Val == &Arg) {
+    //     //     LLVM_DEBUG(llvm::dbgs() << "found matching arg type " <<
+    //     SubprogramArgTypes[Idx]
+    //     //                  << "\n");
+    //     //     LLVM_DEBUG(SubprogramArgTypes[Idx]->print(llvm::dbgs()));
+    //     //     LLVM_DEBUG(llvm::dbgs() << "\n");
+    //     //     Type = SubprogramArgTypes[Idx];
+    //     //     break;
+    //     //   }
+
+    //     //   llvm::dbgs() << "non matching type " << SubprogramArgTypes[Idx]
+    //     << "\n";
+
+    //     //   ++Idx;
+    //     // }
+    //   }
+    // }
+
+    // if (!isa<Constant>(Val)) {
+    //   llvm::errs() << "determining type based on debug info\n";
+    //   SmallVector<DbgVariableIntrinsic *> DbgUsers;
+    //   findDbgUsers(DbgUsers, Val);
+    //   llvm::errs() << "num of dbg users " << DbgUsers.size() << "\n";
+
+    //   auto asd = findDVRValues(Val);
+    //   llvm::dbgs() << "debug value records " << asd.size() << "\n";
+
+    //   // TODO: Multiple dbg values? Why in a loop, use just the last one?
+    //   for (const auto *User : llvm::reverse(findDVRValues(Val))) {
+    //     llvm::errs() << "point 2\n";
+    //     DILocalVariable *Var = User->getVariable();
+    //     Var->getType()->print(llvm::errs(), CI->getModule(), true);
+    //     Var->getRawType()->print(llvm::errs(), CI->getModule(), true);
+
+    //     llvm::dbgs() << "using dbg type\n";
+    //     Type = Var->getType();
+    //     if (Type) {
+    //       llvm::dbgs() << "found type from debug info\n";
+    //       Type->print(llvm::dbgs());
+    //       llvm::dbgs() << "\n";
+    //       break;
+    //     }
+    //   }
+    // } else {
+    //   llvm::dbgs() << "skipping metadata check " << (bool)Type << " "
+    //                << isa<Instruction>(Val) << "\n";
+    // }
+
+    DIType *Type = getTypeFromDebugInfo(CI->getFunction(), Val);
+
+    std::optional<std::pair<unsigned, int64_t>> ShortestVal;
+    if (Type) {
+      llvm::dbgs() << "type was deduced\n";
+      Type->print(llvm::dbgs(), CI->getModule(), true);
+      llvm::dbgs() << "\n";
+      if (const auto *CT = dyn_cast<DICompositeType>(Type)) {
+        llvm::dbgs() << "type is composite\n";
+        if (CT->getElements()) {
+          llvm::dbgs() << "going through elements " << CT->getElements().size()
+                       << "\n";
+          for (auto *El : CT->getElements()) {
+            llvm::dbgs() << "looking at " << El << "\n";
+            if (const auto *Enu = dyn_cast<DIEnumerator>(El)) {
+              llvm::dbgs() << "found value " << Enu->getValue().getSExtValue()
+                           << "\n";
+              auto Len = getConstantLength(Enu->getValue().getSExtValue(), 10);
+              if (!ShortestVal || ShortestVal->first > Len) {
+                llvm::dbgs() << "new shortest length " << Len << "\n";
+                ShortestVal = {Len, Enu->getValue().getSExtValue()};
+              }
+            } else {
+              llvm::dbgs() << "not an enumerator value\n";
+            }
+          }
+        } else {
+          llvm::dbgs() << "could not find elements\n";
+        }
+      } else {
+        llvm::dbgs() << "not a composite type\n";
+        Type->print(llvm::dbgs());
+        llvm::dbgs() << "\n";
+      }
+    } else {
+      llvm::dbgs() << "no type could be deduced\n";
+    }
+
+    if (ShortestVal) {
+
+      llvm::dbgs() << "using shortest enum value " << ShortestVal->second
+                   << " with length " << ShortestVal->first << "\n";
+      unsigned ArgSize = ShortestVal->first;
       if (Dir.Precision && Dir.Precision->first == 0 &&
-          Dir.Precision->second == 0 &&
-          ArgRange.getLower().getSExtValue() == 0 &&
+          Dir.Precision->second == 0 && ShortestVal->second == 0 &&
           !((Base == 8 && Dir.FlagHash) || MaybeSign))
         ArgSize = 0;
       DirRes.MinLength = ArgSize;
       DirRes.OverBaseline = ArgSize - 1;
-      LLVM_DEBUG(llvm::dbgs()
-                 << "Adding const int with min value "
-                 << ArgRange.getSignedMin() << " and size " << ArgSize << "\n");
     } else {
-      auto RangeMin = ArgRange.getLower().getSExtValue();
-      auto RangeMax = ArgRange.getUpper().getSExtValue();
-      int64_t MinLenValue = 0;
-      if (RangeMin > 0) {
-        MinLenValue = RangeMin;
-      } else if (RangeMax < 0) {
-        MinLenValue = RangeMax;
+
+      // Try to evaluate this number.
+      ConstantRange ArgRange = LVI.getConstantRange(Val, CI, false);
+      LLVM_DEBUG(llvm::dbgs()
+                 << "determined range (u) " << ArgRange.getUnsignedMin() << " "
+                 << ArgRange.getUnsignedMax() << "\n");
+      LLVM_DEBUG(llvm::dbgs()
+                 << "determined range (s) " << ArgRange.getSignedMin() << " "
+                 << ArgRange.getSignedMax() << "\n");
+      if (ArgRange.isSingleElement()) {
+        unsigned ArgSize =
+            getConstantLength(ArgRange.getLower().getSExtValue(), Base,
+                              Dir.Precision, MaybeSign, MaybeBase);
+        // Special case: precision of 0 doesn't print the 0 constant.
+        if (Dir.Precision && Dir.Precision->first == 0 &&
+            Dir.Precision->second == 0 &&
+            ArgRange.getLower().getSExtValue() == 0 &&
+            !((Base == 8 && Dir.FlagHash) || MaybeSign))
+          ArgSize = 0;
+        DirRes.MinLength = ArgSize;
+        DirRes.OverBaseline = ArgSize - 1;
+        LLVM_DEBUG(llvm::dbgs() << "Adding const int with min value "
+                                << ArgRange.getSignedMin() << " and size "
+                                << ArgSize << "\n");
+      } else {
+        auto RangeMin = ArgRange.getSignedMin().getSExtValue();
+        auto RangeMax = ArgRange.getSignedMax().getSExtValue();
+        int64_t MinLenValue = 0;
+        if (RangeMin > 0) {
+          MinLenValue = RangeMin;
+        } else if (RangeMax < 0) {
+          MinLenValue = RangeMax;
+        }
+        unsigned MinLen = getConstantLength(MinLenValue, Base, Dir.Precision,
+                                            MaybeSign, MaybeBase);
+        DirRes.MinLength = MinLen;
+        DirRes.OverBaseline = MinLen - 1;
+        LLVM_DEBUG(llvm::dbgs() << "Adding range int with min value "
+                                << MinLenValue << " size " << MinLen << "\n");
       }
-      unsigned MinLen = getConstantLength(MinLenValue, Base, Dir.Precision,
-                                          MaybeSign, MaybeBase);
-      DirRes.MinLength = MinLen;
-      DirRes.OverBaseline = MinLen - 1;
-      LLVM_DEBUG(llvm::dbgs() << "Adding range int with min value "
-                              << MinLenValue << " size " << MinLen << "\n");
     }
   }
 

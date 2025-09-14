@@ -19,10 +19,9 @@ void test_format_truncation(void) {
   // Test literals:
   snprintf(dest, 5, "abcd");  // okay
   snprintf(dest, 5, "abcde"); // expected-warning 2 {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}}
-  snprintf(dest, 5, "%%%%%%%%%%"); // expected-warning 2 {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}} 
+  snprintf(dest, 5, "%%%%%%%%%%"); // expected-warning 2 {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}}
 
   // Test integers:
-  snprintf(dest, 5, "%d", 1234);   // okay
   snprintf(dest, 5, "%d", 12345);  // expected-warning {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}}
 
   snprintf(dest, 5, "%*d", 5, 1);  // expected-warning {{'snprintf' will always be truncated}}
@@ -35,7 +34,16 @@ void test_format_truncation(void) {
   snprintf(dest, 5, "%d", e); // expected-warning {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}}
   int f = bool2 ? -1234 : -56789;
   snprintf(dest, 5, "%d", f); // expected-warning {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}}
-  
+
+  snprintf(dest, 5, "%5d", 123);  // expected-warning 2 {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}}
+  snprintf(dest, 5, "%.5d", 123); // expected-warning 2 {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}}
+  snprintf(dest, 1, "%.0d", 0);   // special case: zero should not be printed when precision is 0
+  snprintf(dest, 1, "%.d", 0);    // same as above .0 is implicit // TODO: Bug in llvm // expected-warning {{'snprintf' will always be truncated}}
+
+  snprintf(dest, 2, "%X", 0xAB); // expected-warning {{'snprintf' will always be truncated; specified size is 2, but format string expands to at least 3}}
+  snprintf(dest, 4, "%+d", 123); // expected-warning {{'snprintf' will always be truncated; specified size is 4, but format string expands to at least 5}}
+  snprintf(dest, 4, "%#x", 0xAB); // expected-warning {{'snprintf' will always be truncated; specified size is 4, but format string expands to at least 5}}
+
   // Test strings:
   // Added _ to format string to avoid optimizations
   snprintf(dest, 5, "_%s", "1234");     // expected-warning {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}}
@@ -45,59 +53,51 @@ void test_format_truncation(void) {
   // Test %n directive:
   int CurrentLen;
   snprintf(dest, 5, "abcd%n", &CurrentLen);      // Fine, writing 5 bytes to destination of size 5.
-  snprintf(dest, 5, "abc%n%d", &CurrentLen, 10); // expected-warning {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}} 
+  snprintf(dest, 5, "abc%n%d", &CurrentLen, 10); // expected-warning {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}}
+
+  // Test pointers:
+  // null pointer is printed as "(nil)"
+  snprintf(dest, 5, "%p", NULL); // expected-warning {{'snprintf' will always be truncated; specified size is 5, but format string expands to at least 6}}
+
+  // 64bit pointer is treated as 14 chars long
+  snprintf(dest, 14, "%p", &a); // expected-warning {{'snprintf' will always be truncated; specified size is 14, but format string expands to at least 15}}
 
   // Test floats:
-  snprintf(dest, 3, "%X", 0xAB); 
-  //                                                    // Fine, writing 3 bytes to destination of size 3.
-  snprintf(dest, 2, "%X", 0xAB); // expected-warning {{'snprintf' will always be truncated}} 
-                                                          // Writing at least 6 bytes to 5 byte destination
-
-  snprintf(dest, 5, "%+d", 123);  
-                                                        // Fine, writing 5 bytes to destination of size 5.
-  snprintf(dest, 4, "%+d", 123); // expected-warning {{'snprintf' will always be truncated}} 
-                                                        // Writing at least 5 bytes to 4 byte destination
-
-  snprintf(dest, 5, "%#x", 0xAB); 
-  //                                                      // Fine, writing 5 bytes to destination of size 5.
-  snprintf(dest, 4, "%#x", 0xAB); // expected-warning {{'snprintf' will always be truncated}} 
-                                                            // Writing at least 5 bytes to 4 byte destination
-
-  snprintf(dest, 5, "%4d", 123); 
-  //                                                                      // Fine
-  snprintf(dest, 5, "%5d", 123);  // expected-warning 2 {{'snprintf' will always be truncated}}
-  snprintf(dest, 5, "%.4d", 123);  
-  snprintf(dest, 5, "%.5d", 123);  // expected-warning 2 {{'snprintf' will always be truncated}}
-  snprintf(dest, 1, "%.0d", 0); 
-  //                                                  // special case: zero should not be printed when precision is 0
-  snprintf(dest, 1, "%.d", 0);   // TODO: Bug in llvm // expected-warning {{'snprintf' will always be truncated}}
-  //                                                  // same as above .0 is implicit
-
-  snprintf(dest, 5, "%p", NULL); // expected-warning {{'snprintf' will always be truncated}} 
-  //                                                  // null pointer is printed as "(nil)"
-  snprintf(dest, 6, "%p", NULL); 
-  //                                                  // null pointer is printed as "(nil)"
-
-  snprintf(dest, 14, "%p", &a); // expected-warning {{'snprintf' will always be truncated}} 
-  //                                                  // 64bit pointer is treated as 14 chars long
-  snprintf(dest, 15, "%p", &a); 
-  //                                                  // 64bit pointer is treated as 14 chars long
-
-  snprintf(dest, 8, "%f", 1.5); // expected-warning 2 {{'snprintf' will always be truncated}} 
+  snprintf(dest, 8, "%f", 1.5); // expected-warning 2 {{'snprintf' will always be truncated}}
   //                                                  // default precision is 6, prints 1.500000
-  snprintf(dest, 9, "%f",  1.5); 
+  snprintf(dest, 9, "%f",  1.5);
   //                                                  // default precision is 6, prints 1.500000
-  snprintf(dest, 8, "%.5f",  1.5); 
+  snprintf(dest, 8, "%.5f",  1.5);
   //                                                  // lower precision to 5, prints 1.50000
 
-  snprintf(dest, 7, "%.1e", 1.5); // expected-warning {{'snprintf' will always be truncated}} 
-  //                                                  // prints 1.5e+00
-  snprintf(dest, 8, "%.1e", 1.5); 
-  //                                                  // prints 1.5e+00
+  // prints 1.5e+00
+  snprintf(dest, 7, "%.1e", 1.5); // expected-warning {{'snprintf' will always be truncated; specified size is 7, but format string expands to at least 8}}
 
-  snprintf(dest, 6, "%a", 0x1.0p2); // expected-warning 2 {{'snprintf' will always be truncated}} 
-  //                                                  // prints 0x1p+3
-  snprintf(dest, 7, "%a", 0x1.0p2); 
-  //                                                  // prints 0x1p+3
+  // prints 0x1p+3
+  snprintf(dest, 6, "%a", 0x1.0p2); // expected-warning 2 {{'snprintf' will always be truncated; specified size is 6, but format string expands to at least 7}}
 
+}
+
+enum Short {
+  SHORT1, SHORT2, SHORT3
+};
+
+void print_enum_short_arg(enum Short x) {
+  char buffer[10];
+  snprintf(buffer, 3, "%d", x);
+}
+
+enum Long {
+  LONG1000=1000, LONG1001, LONG1002
+};
+
+void print_enum_long_arg(enum Long x) {
+  char buffer[10];
+  snprintf(buffer, 3, "%d", x);
+}
+
+int print_int_arg(int x) {
+  char buffer[10];
+  enum Long my_var = (enum Long)x;
+  snprintf(buffer, 3, "%d", my_var);
 }
