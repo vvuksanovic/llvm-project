@@ -63,16 +63,17 @@ void test_format_truncation(void) {
   snprintf(dest, 14, "%p", &a); // expected-warning {{'snprintf' will always be truncated; specified size is 14, but format string expands to at least 15}}
 
   // Test floats:
-  snprintf(dest, 8, "%f", 1.5); // expected-warning 2 {{'snprintf' will always be truncated}}
-  //                                                  // default precision is 6, prints 1.500000
-  snprintf(dest, 9, "%f",  1.5);
-  //                                                  // default precision is 6, prints 1.500000
-  snprintf(dest, 8, "%.5f",  1.5);
-  //                                                  // lower precision to 5, prints 1.50000
+  // %f
+  // default precision is 6, prints 1.500000
+  snprintf(dest, 8, "%f", 1.5); // expected-warning 2 {{'snprintf' will always be truncated; specified size is 8, but format string expands to at least 9}}
+  // lower precision to 5, prints 1.50000
+  snprintf(dest, 7, "%.5f",  1.5); // expected-warning 2 {{'snprintf' will always be truncated; specified size is 7, but format string expands to at least 8}}
 
+  // %e
   // prints 1.5e+00
   snprintf(dest, 7, "%.1e", 1.5); // expected-warning {{'snprintf' will always be truncated; specified size is 7, but format string expands to at least 8}}
 
+  // %a
   // prints 0x1p+3
   snprintf(dest, 6, "%a", 0x1.0p2); // expected-warning 2 {{'snprintf' will always be truncated; specified size is 6, but format string expands to at least 7}}
 
@@ -84,7 +85,7 @@ enum Short {
 
 void print_enum_short_arg(enum Short x) {
   char buffer[10];
-  snprintf(buffer, 3, "%d", x);
+  snprintf(buffer, 3, "%d", x); // fine, enum values start from 0.
 }
 
 enum Long {
@@ -93,11 +94,11 @@ enum Long {
 
 void print_enum_long_arg(enum Long x) {
   char buffer[10];
-  snprintf(buffer, 3, "%d", x);
+  snprintf(buffer, 3, "%d", x); // expected-warning {{'snprintf' will always be truncated; specified size is 3, but format string expands to at least 5}}
 }
 
-int print_int_arg(int x) {
+void print_enum_long_cast(int x) {
   char buffer[10];
   enum Long my_var = (enum Long)x;
-  snprintf(buffer, 3, "%d", my_var);
+  snprintf(buffer, 3, "%d", my_var); // expected-warning {{'snprintf' will always be truncated; specified size is 3, but format string expands to at least 5}}
 }
