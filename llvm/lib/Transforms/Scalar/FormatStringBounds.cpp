@@ -74,7 +74,7 @@ struct FormatDirective {
   std::optional<std::pair<unsigned, unsigned>> Width = std::nullopt;
   std::optional<std::pair<unsigned, unsigned>> Precision = std::nullopt;
 
-  // unsigned ArgNo = 0;
+  unsigned ArgNo = 0;
 
   enum Modifiers { NONE, hh, h, l, ll, j, z, t, L };
   char Specifier = ' ';
@@ -82,6 +82,8 @@ struct FormatDirective {
 
   const char *BeginPos = nullptr;
   unsigned Length = 0;
+
+  bool IsSupported = true;
 };
 
 static unsigned parseIntegerLiteral(const char *&Val) {
@@ -129,8 +131,27 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
 
   LLVM_DEBUG(llvm::dbgs() << "found directive\n");
 
+  // Check from POSIX argument number. This could also be a width specifier
+  // depending on if the $ character follows it.
+  if (isDigit(*CharIt)) {
+    auto ArgFmtIdx = parseIntegerLiteral(CharIt);
+    if (*CharIt == '$') {
+      // Found dollar sign, this is a POSIX arg number.
+      Dir.ArgNo = ArgFmtIdx;
+      ++CharIt;
+      Dir.IsSupported = false;
+    } else {
+      // DOllar sign not found, this was the width.
+      Dir.Width = {ArgFmtIdx, ArgFmtIdx};
+    }
+  }
+  if (CharIt >= FormatStr.end()) {
+    LLVM_DEBUG(llvm::dbgs() << "Invalid directive 1.5\n");
+    return getLiteralDirective(DirectiveStart, CharIt);
+  }
+
   // Interpret directive flags.
-  while (CharIt != FormatStr.end()) {
+  while (!Dir.Width && CharIt != FormatStr.end()) {
     switch (*CharIt) {
     case '-':
     case '0':
@@ -165,43 +186,45 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
     return getLiteralDirective(DirectiveStart, CharIt);
   }
 
-  // Interpret the field width.
-  if (*CharIt == '*') {
-    // the width is specified by an additional argument of type int, which
-    // appears before the argument to be converted and the argument supplying
-    // precision if one is supplied
-    ++CharIt;
-    // Check if the argument exists.
-    if (ArgNo < CI->getNumOperands()) {
-      // Note that this is the minimum based on the format string, the actual
-      // minimum dependent on the actual argument could be more.
-      Value *ArgWidthValue = CI->getArgOperand(ArgNo);
-      ConstantInt *ArgWidthConst = dyn_cast<ConstantInt>(ArgWidthValue);
-      if (ArgWidthConst) {
-        // If the value is negative then '-' flag should be applied and the
-        // value treated as positive. We're not interested in the '-' flag, so
-        // we ignore that part.
-        auto ArgWidth = std::abs(ArgWidthConst->getSExtValue());
-        Dir.Width = {ArgWidth, ArgWidth};
+  // Interpret the field width if we didn't already parse it as the arg number.
+  if (!Dir.Width) {
+    if (*CharIt == '*') {
+      // the width is specified by an additional argument of type int, which
+      // appears before the argument to be converted and the argument supplying
+      // precision if one is supplied
+      ++CharIt;
+      // Check if the argument exists.
+      if (ArgNo < CI->getNumOperands()) {
+        // Note that this is the minimum based on the format string, the actual
+        // minimum dependent on the actual argument could be more.
+        Value *ArgWidthValue = CI->getArgOperand(ArgNo);
+        ConstantInt *ArgWidthConst = dyn_cast<ConstantInt>(ArgWidthValue);
+        if (ArgWidthConst) {
+          // If the value is negative then '-' flag should be applied and the
+          // value treated as positive. We're not interested in the '-' flag, so
+          // we ignore that part.
+          auto ArgWidth = std::abs(ArgWidthConst->getSExtValue());
+          Dir.Width = {ArgWidth, ArgWidth};
+        } else {
+          // If the value is not constant use LVI to find the bounds.
+          ConstantRange ArgRange = LVI.getConstantRange(ArgWidthValue, CI, false);
+          Dir.Width = {ArgRange.getUnsignedMin().getZExtValue(),
+                      ArgRange.getUnsignedMax().getZExtValue()};
+        }
       } else {
-        // If the value is not constant use LVI to find the bounds.
-        ConstantRange ArgRange = LVI.getConstantRange(ArgWidthValue, CI, false);
-        Dir.Width = {ArgRange.getUnsignedMin().getZExtValue(),
-                     ArgRange.getUnsignedMax().getZExtValue()};
+        // The argument is supplied via varargs and we can't use it.
+        Dir.Width = std::nullopt;
       }
-    } else {
-      // The argument is supplied via varargs and we can't use it.
-      Dir.Width = std::nullopt;
+      ++ArgNo;
+    } else if (isDigit(*CharIt)) {
+      // The width is specified in the format string.
+      auto Width = parseIntegerLiteral(CharIt);
+      Dir.Width = {Width, Width};
     }
-    ++ArgNo;
-  } else if (isDigit(*CharIt)) {
-    // The width is specified in the format string.
-    auto Width = parseIntegerLiteral(CharIt);
-    Dir.Width = {Width, Width};
-  }
-  if (CharIt >= FormatStr.end()) {
-    LLVM_DEBUG(llvm::dbgs() << "Invalid directive 3\n");
-    return getLiteralDirective(DirectiveStart, CharIt);
+    if (CharIt >= FormatStr.end()) {
+      LLVM_DEBUG(llvm::dbgs() << "Invalid directive 3\n");
+      return getLiteralDirective(DirectiveStart, CharIt);
+    }
   }
 
   // Interpret the field precision.
@@ -297,7 +320,10 @@ static FormatDirective parseDirective(StringRef FormatStr, const char *Begin,
   Dir.Specifier = *CharIt;
   assert(StringRef("diuoxXfFeEgGaAcspn%").contains(Dir.Specifier) &&
          "Invalid format specifier");
+  if (!StringRef("diuoxXfFeEgGaAcspn%").contains(Dir.Specifier))
+    Dir.IsSupported = false;
 
+  Dir.ArgNo = ArgNo;
   Dir.Length = CharIt - Begin + 1;
   return Dir;
 }
@@ -366,7 +392,7 @@ static DIType *getTypeFromDebugInfo(Function *F, Value *Val) {
 }
 
 static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
-                                  unsigned CurrentArg, LazyValueInfo &LVI) {
+                                  LazyValueInfo &LVI) {
   FormatResult DirRes;
 
   bool MaybeBase = Dir.FlagHash;
@@ -384,17 +410,17 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
     llvm_unreachable("Unsupported numeric specifier");
   }
 
-  if (CurrentArg >= CI->getNumOperands()) {
+  if (Dir.ArgNo >= CI->getNumOperands()) {
     // Argument not provided, assume it is one byte long.
     DirRes.MinLength = 1;
   } else {
-    Value *Val = CI->getArgOperand(CurrentArg);
+    Value *Val = CI->getArgOperand(Dir.ArgNo);
 
     LLVM_DEBUG(llvm::dbgs() << "Found arg\n");
     LLVM_DEBUG(Val->print(llvm::dbgs()));
     LLVM_DEBUG(llvm::dbgs() << "\n");
 
-    // llvm::errs() << "checking function arguments\n";
+    // llvm::dbgs() << "checking function arguments\n";
     // llvm::dbgs() << "is val an argument " <<  << "\n";
 
     // !183 = distinct !DISubprogram(name: "print_enum_short_arg", scope: !2,
@@ -447,20 +473,20 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
     // }
 
     // if (!isa<Constant>(Val)) {
-    //   llvm::errs() << "determining type based on debug info\n";
+    //   llvm::dbgs() << "determining type based on debug info\n";
     //   SmallVector<DbgVariableIntrinsic *> DbgUsers;
     //   findDbgUsers(DbgUsers, Val);
-    //   llvm::errs() << "num of dbg users " << DbgUsers.size() << "\n";
+    //   llvm::dbgs() << "num of dbg users " << DbgUsers.size() << "\n";
 
     //   auto asd = findDVRValues(Val);
     //   llvm::dbgs() << "debug value records " << asd.size() << "\n";
 
     //   // TODO: Multiple dbg values? Why in a loop, use just the last one?
     //   for (const auto *User : llvm::reverse(findDVRValues(Val))) {
-    //     llvm::errs() << "point 2\n";
+    //     llvm::dbgs() << "point 2\n";
     //     DILocalVariable *Var = User->getVariable();
-    //     Var->getType()->print(llvm::errs(), CI->getModule(), true);
-    //     Var->getRawType()->print(llvm::errs(), CI->getModule(), true);
+    //     Var->getType()->print(llvm::dbgs(), CI->getModule(), true);
+    //     Var->getRawType()->print(llvm::dbgs(), CI->getModule(), true);
 
     //     llvm::dbgs() << "using dbg type\n";
     //     Type = Var->getType();
@@ -586,19 +612,18 @@ static FormatResult formatInteger(const FormatDirective &Dir, CallInst *CI,
 }
 
 static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
-                                 unsigned CurrentArg,
                                  const TargetLibraryInfo &TLI) {
   FormatResult DirRes;
 
   // If the argument is not passed in, there is nothing to do. Assume the length
   // is 0 unless width or precision is specified.
-  if (CurrentArg >= CI->getNumOperands()) {
+  if (Dir.ArgNo >= CI->getNumOperands()) {
     if (Dir.Width)
       DirRes.adjust(Dir.Width->first);
     return DirRes;
   }
 
-  Value *Val = CI->getArgOperand(CurrentArg);
+  Value *Val = CI->getArgOperand(Dir.ArgNo);
   LLVM_DEBUG(Val->print(llvm::dbgs(), true));
   LLVM_DEBUG(llvm::dbgs() << "\n");
   LLVM_DEBUG(Val->getType()->print(llvm::dbgs(), true, false));
@@ -745,13 +770,12 @@ static FormatResult formatString(const FormatDirective &Dir, CallInst *CI,
   return DirRes;
 }
 
-static FormatResult formatFloat(const FormatDirective &Dir, CallInst *CI,
-                                unsigned CurrentArg) {
+static FormatResult formatFloat(const FormatDirective &Dir, CallInst *CI) {
   FormatResult DirRes;
 
   unsigned MinIntLength = 1;
-  if (CurrentArg < CI->getNumOperands()) {
-    if (const auto *CFP = dyn_cast<ConstantFP>(CI->getArgOperand(CurrentArg))) {
+  if (Dir.ArgNo < CI->getNumOperands()) {
+    if (const auto *CFP = dyn_cast<ConstantFP>(CI->getArgOperand(Dir.ArgNo))) {
       if (CFP->isInfinity() || CFP->isNaN()) {
         // The argument is a constant inf or nan.
         bool HasSign = Dir.FlagPlus || CFP->isNegative();
@@ -841,13 +865,12 @@ static FormatResult formatFloat(const FormatDirective &Dir, CallInst *CI,
   return DirRes;
 }
 
-static FormatResult formatPointer(const FormatDirective &Dir, CallInst *CI,
-                                  unsigned CurrentArg) {
+static FormatResult formatPointer(const FormatDirective &Dir, CallInst *CI) {
   FormatResult DirRes;
 
   // NOTE: Pointers printing is implementation and target defined.
   // These are just estimates.
-  Value *Val = CI->getArgOperand(CurrentArg);
+  Value *Val = CI->getArgOperand(Dir.ArgNo);
   if (isa<ConstantPointerNull>(Val)) {
     LLVM_DEBUG(llvm::dbgs() << "pointer is null const, using range 5\n");
     // Null pointer prints "(nil)" in both clang and gcc.
@@ -993,6 +1016,11 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           LLVM_DEBUG(llvm::dbgs()
                      << "Parsed Directive with specifier '" << Dir.Specifier
                      << "' and length " << Dir.Length << "\n");
+          if (!Dir.IsSupported) {
+            // Unsupported directive. Do not continue.
+            LLVM_DEBUG(llvm::dbgs() << "error: unsupported directive\n");
+            break;
+          }
           if (Dir.Specifier == ' ' || Dir.Length == 0) {
             // Invalid specifier. Do not continue.
             LLVM_DEBUG(llvm::dbgs() << "error: bad specifier\n");
@@ -1008,17 +1036,17 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           case 'x':
           case 'X':
             LLVM_DEBUG(llvm::dbgs() << "formatting %" << Dir.Specifier
-                                    << " for arg " << CurrentArg << "\n");
-            DirRes = formatInteger(Dir, CI, CurrentArg, LVI);
+                                    << " for arg " << Dir.ArgNo << "\n");
+            DirRes = formatInteger(Dir, CI, LVI);
             break;
           case 's':
             LLVM_DEBUG(llvm::dbgs()
-                       << "formatting %s for arg " << CurrentArg << "\n");
-            DirRes = formatString(Dir, CI, CurrentArg, TLI);
+                       << "formatting %s for arg " << Dir.ArgNo << "\n");
+            DirRes = formatString(Dir, CI, TLI);
             break;
           case 'c':
             LLVM_DEBUG(llvm::dbgs()
-                       << "formatting %c for arg " << CurrentArg << "\n");
+                       << "formatting %c for arg " << Dir.ArgNo << "\n");
             DirRes.MinLength = 1;
 
             if (Dir.Width)
@@ -1027,8 +1055,8 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
             break;
           case 'p':
             LLVM_DEBUG(llvm::dbgs()
-                       << "formatting %p for arg " << CurrentArg << "\n");
-            DirRes = formatPointer(Dir, CI, CurrentArg);
+                       << "formatting %p for arg " << Dir.ArgNo << "\n");
+            DirRes = formatPointer(Dir, CI);
             break;
           case 'f':
           case 'F':
@@ -1039,8 +1067,8 @@ PreservedAnalyses FormatStringBoundsPass::run(Function &F,
           case 'g':
           case 'G':
             LLVM_DEBUG(llvm::dbgs() << "formatting %" << Dir.Specifier
-                                    << " for arg " << CurrentArg << "\n");
-            DirRes = formatFloat(Dir, CI, CurrentArg);
+                                    << " for arg " << Dir.ArgNo << "\n");
+            DirRes = formatFloat(Dir, CI);
             break;
           case '%':
             // Literal '%' char.
