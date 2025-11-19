@@ -7026,14 +7026,18 @@ std::string escapeFormatString(StringRef Input) {
   return Result;
 }
 
-static void CheckMissingFormatAttributes(
+static bool CheckMissingFormatAttribute(
     Sema *S, ArrayRef<const Expr *> Args, Sema::FormatArgumentPassingKind APK,
     StringLiteral *ReferenceFormatString, unsigned FormatIdx,
     unsigned FirstDataArg, FormatStringType FormatType, unsigned CallerParamIdx,
     SourceLocation Loc) {
+  if (S->getDiagnostics().isIgnored(diag::warn_missing_format_attribute,
+                                    SourceLocation()))
+    return false;
+
   NamedDecl *Caller = S->getCurFunctionOrMethodDecl();
   if (!Caller)
-    return;
+    return false;
   Caller = dyn_cast<NamedDecl>(Caller->getCanonicalDecl());
 
   unsigned NumCallerParams = getFunctionOrMethodNumParams(Caller);
@@ -7055,17 +7059,17 @@ static void CheckMissingFormatAttributes(
     unsigned NumCalleeArgs = Args.size() - FirstDataArg;
     if (NumCalleeArgs == 0 || NumCallerParams < NumCalleeArgs) {
       // There aren't enough arguments in the caller to pass to callee.
-      return;
+      return false;
     }
     for (unsigned CalleeIdx = Args.size() - 1, CallerIdx = NumCallerParams - 1;
          CalleeIdx >= FirstDataArg; --CalleeIdx, --CallerIdx) {
       const auto *Arg =
           dyn_cast<DeclRefExpr>(Args[CalleeIdx]->IgnoreParenCasts());
       if (!Arg)
-        return;
+        return false;
       const auto *Param = dyn_cast<ParmVarDecl>(Arg->getDecl());
       if (!Param || Param->getFunctionScopeIndex() != CallerIdx)
-        return;
+        return false;
     }
     FirstArgumentIndex =
         NumCallerParams + CallerArgumentIndexOffset - NumCalleeArgs;
@@ -7080,7 +7084,7 @@ static void CheckMissingFormatAttributes(
   case Sema::FormatArgumentPassingKind::FAPK_Elsewhere:
     // The callee has a format_matches attribute. We will emit that instead.
     if (!ReferenceFormatString)
-      return;
+      return false;
     break;
   }
 
@@ -7124,6 +7128,8 @@ static void CheckMissingFormatAttributes(
 
     DB << FixItHint::CreateInsertion(SL, Fixit);
   } while (false);
+  if (S->getDiagnostics().isLastDiagnosticIgnored())
+    return false;
   S->Diag(Caller->getLocation(), diag::note_entity_declared_at) << Caller;
 
   if (APK != Sema::FormatArgumentPassingKind::FAPK_Elsewhere) {
@@ -7135,6 +7141,7 @@ static void CheckMissingFormatAttributes(
         S->getASTContext(), &S->getASTContext().Idents.get(FormatTypeName),
         FormatStringIndex, ReferenceFormatString));
   }
+  return true;
 }
 
 bool Sema::CheckFormatArguments(ArrayRef<const Expr *> Args,
@@ -7193,11 +7200,10 @@ bool Sema::CheckFormatArguments(ArrayRef<const Expr *> Args,
       SourceMgr.isInSystemMacro(FormatLoc))
     return false;
 
-  const LangOptions &LO = getLangOpts();
-  if (CallerParamIdx && (LO.GNUMode || LO.C23 || LO.CPlusPlus11))
-    CheckMissingFormatAttributes(this, Args, APK, ReferenceFormatString,
-                                 format_idx, firstDataArg, Type,
-                                 *CallerParamIdx, Loc);
+  if (CallerParamIdx && CheckMissingFormatAttribute(
+                            this, Args, APK, ReferenceFormatString, format_idx,
+                            firstDataArg, Type, *CallerParamIdx, Loc))
+    return false;
 
   // Strftime is particular as it always uses a single 'time' argument,
   // so it is safe to pass a non-literal string.
