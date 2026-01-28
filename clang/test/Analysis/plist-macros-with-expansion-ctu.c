@@ -1,17 +1,32 @@
 // RUN: rm -rf %t && mkdir %t
-// RUN: mkdir -p %t/ctudir
-// RUN: %clang_cc1 -emit-pch -detailed-preprocessing-record -o %t/ctudir/plist-macros-ctu.c.ast %S/Inputs/plist-macros-ctu.c
-// RUN: cp %S/Inputs/plist-macros-with-expansion-ctu.c.externalDefMap.txt %t/ctudir/externalDefMap.txt
+//
+// RUN: mkdir -p %t/ctudir-pch
+// RUN: %clang_cc1 -emit-pch -detailed-preprocessing-record -o %t/ctudir-pch/plist-macros-ctu.c.ast %S/Inputs/plist-macros-ctu.c
+// RUN: cp %S/Inputs/plist-macros-with-expansion-ctu.c.externalDefMap.txt %t/ctudir-pch/externalDefMap.txt
 //
 // RUN: %clang_analyze_cc1 -analyzer-checker=core \
 // RUN:   -analyzer-config experimental-enable-naive-ctu-analysis=true \
-// RUN:   -analyzer-config ctu-dir=%t/ctudir \
+// RUN:   -analyzer-config ctu-dir=%t/ctudir-pch \
 // RUN:   -analyzer-config expand-macros=true \
-// RUN:   -analyzer-output=plist-multi-file -o %t.plist -verify %s
+// RUN:   -analyzer-output=plist-multi-file -o %t-pch.plist -verify %s
+//
+// RUN: mkdir -p %t/ctudir-ondemand
+// RUN: cp "%S/Inputs/plist-macros-ctu.c" "%t/ctudir-ondemand/plist-macros-ctu.c"
+// RUN: cp "%S/Inputs/plist-macros-ctu.h" "%t/ctudir-ondemand/plist-macros-ctu.h"
+// RUN: echo '"%t/ctudir-ondemand/plist-macros-ctu.c": ["clang", "%t/ctudir-ondemand/plist-macros-ctu.c"]' | sed -e 's/\\/\\\\/g' > %t/ctudir-ondemand/invocations.yaml
+// RUN: cp %S/Inputs/plist-macros-with-expansion-ctu-ondemand.c.externalDefMap.txt %t/ctudir-ondemand/externalDefMap.txt
+//
+// RUN: %clang_analyze_cc1 -analyzer-checker=core \
+// RUN:   -analyzer-config experimental-enable-naive-ctu-analysis=true \
+// RUN:   -analyzer-config ctu-dir=%t/ctudir-ondemand \
+// RUN:   -analyzer-config expand-macros=true \
+// RUN:   -analyzer-config ctu-invocation-list=%t/ctudir-ondemand/invocations.yaml \
+// RUN:   -analyzer-output=plist-multi-file -o %t-ondemand.plist -verify %s
 //
 // Check the macro expansions from the plist output here, to make the test more
 // understandable.
-//   RUN: FileCheck --input-file=%t.plist %s
+//   RUN: FileCheck --input-file=%t-pch.plist %s
+//   RUN: FileCheck --input-file=%t-ondemand.plist %s
 
 extern void F1(int **);
 extern void F2(int **);
@@ -91,7 +106,7 @@ void test3(void) {
 // CHECK-NEXT:  <dict>
 // CHECK-NEXT:   <key>location</key>
 // CHECK-NEXT:   <dict>
-// CHECK-NEXT:    <key>line</key><integer>85</integer>
+// CHECK-NEXT:    <key>line</key><integer>100</integer>
 // CHECK-NEXT:    <key>col</key><integer>3</integer>
 // CHECK-NEXT:    <key>file</key><integer>0</integer>
 // CHECK-NEXT:   </dict>
@@ -124,7 +139,7 @@ void test4(void) {
 // CHECK-NEXT:  <dict>
 // CHECK-NEXT:   <key>location</key>
 // CHECK-NEXT:   <dict>
-// CHECK-NEXT:    <key>line</key><integer>118</integer>
+// CHECK-NEXT:    <key>line</key><integer>133</integer>
 // CHECK-NEXT:    <key>col</key><integer>3</integer>
 // CHECK-NEXT:    <key>file</key><integer>0</integer>
 // CHECK-NEXT:   </dict>
