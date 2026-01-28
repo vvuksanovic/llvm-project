@@ -283,7 +283,7 @@ void MacroExpansionContext::onTokenLexed(const Token &Tok) {
   ExpansionMap::iterator It;
   bool Inserted;
   std::tie(It, Inserted) =
-      ExpandedTokens.try_emplace(CurrExpansionLoc, std::move(TokenAsString));
+      ExpandedTokens.try_emplace(CurrExpansionLoc, TokenAsString);
   if (!Inserted)
-    It->getSecond().append(TokenAsString);
+    It->getSecond().append(std::move(TokenAsString));
 }
