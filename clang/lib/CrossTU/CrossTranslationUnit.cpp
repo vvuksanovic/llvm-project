@@ -33,6 +33,7 @@
 #include "llvm/TargetParser/Triple.h"
 #include <algorithm>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <sstream>
 #include <tuple>
@@ -604,9 +605,9 @@ CrossTranslationUnitContext::ASTLoader::loadFromDump(StringRef ASTDumpPath) {
 
   std::unique_ptr<MacroExpansionContext> MacroExpansions;
   if (Unit) {
-    MacroExpansions.reset(new MacroExpansionContext(
+    MacroExpansions = std::make_unique<MacroExpansionContext>(
         Unit->getPreprocessor(), Unit->getLocalPreprocessingEntities(),
-        Unit->getLangOpts()));
+        Unit->getLangOpts());
   }
 
   return LoadResult(std::move(Unit), std::move(MacroExpansions));
@@ -660,11 +661,10 @@ CrossTranslationUnitContext::ASTLoader::loadFromSource(
       CaptureDiagsKind::None, {}, true, 0, TU_Complete, false, false, false,
       SkipFunctionBodiesScope::None, false, false, false, false, std::nullopt,
       nullptr, nullptr, [&MacroExpansions](CompilerInstance &CI) {
-        MacroExpansions.reset(new MacroExpansionContext(CI.getLangOpts()));
+        MacroExpansions =
+            std::make_unique<MacroExpansionContext>(CI.getLangOpts());
         MacroExpansions->registerForPreprocessor(CI.getPreprocessor());
       });
-  MacroExpansions->dumpExpansionRanges();
-  MacroExpansions->dumpExpandedTexts();
   return LoadResult(std::move(Unit), std::move(MacroExpansions));
 }
 

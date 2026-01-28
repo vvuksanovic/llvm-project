@@ -187,12 +187,10 @@ public:
   void emitCrossTUDiagnostics(const IndexError &IE);
 
   /// Returns the MacroExpansionContext for the imported TU and the location in
-  /// the imported-from AST to which the given source-location corresponds. \p
-  /// ToLoc Source location in the imported-to AST. \note If any error happens
-  /// such as \p ToLoc is a non-imported
+  /// the imported-from AST to which the given source-location corresponds.
+  /// \p ToLoc Source location in the imported-to AST.
+  /// \note If any error happens such as \p ToLoc is a non-imported
   ///       source-location, empty is returned.
-  /// \note Macro expansion tracking for imported TUs is not implemented yet.
-  ///       It returns empty unconditionally.
   std::optional<std::pair<MacroExpansionContext, SourceLocation>>
   getMacroExpansionContextForSourceLocation(
       const clang::SourceLocation &ToLoc) const;

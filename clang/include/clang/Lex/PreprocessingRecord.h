@@ -174,8 +174,8 @@ class Preprocessor;
 
   public:
     MacroExpansion(IdentifierInfo *BuiltinName, SourceRange Range)
-        : PreprocessedEntity(MacroExpansionKind, Range), NameOrDef(BuiltinName),
-          Expanded(std::nullopt) {}
+        : PreprocessedEntity(MacroExpansionKind, Range),
+          NameOrDef(BuiltinName) {}
 
     MacroExpansion(MacroDefinitionRecord *Definition, SourceRange Range,
                    std::optional<StringRef> Expanded)
