@@ -14,6 +14,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclBase.h"
+#include "clang/AST/DeclCXX.h"
 #include "clang/AST/Expr.h"
 #include "clang/AST/OperationKinds.h"
 #include "clang/AST/Stmt.h"
@@ -62,7 +63,7 @@ static bool isTrackedVar(const VarDecl *vd, const DeclContext *dc) {
     QualType ty = vd->getType();
     if (const auto *RD = ty->getAsRecordDecl())
       return recordIsNotEmpty(RD);
-    return ty->isScalarType() || ty->isVectorType() || ty->isRVVSizelessBuiltinType();
+    return ty->isScalarType() || ty->isVectorType() || ty->isRVVSizelessBuiltinType() || ty->isArrayType();
   }
   return false;
 }
@@ -261,11 +262,30 @@ static const Expr *stripCasts(ASTContext &C, const Expr *Ex) {
 /// If E is an expression comprising a reference to a single variable, find that
 /// variable.
 static FindVarResult findVar(const Expr *E, const DeclContext *DC) {
+  E = stripCasts(DC->getParentASTContext(), E);
+  if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E)) {
+    llvm::errs() << "going through array subscript expr\n";
+    E = ASE->getBase()->IgnoreImpCasts(); // Remove only array to pointer decay
+    E->dump();
+  }
   if (const auto *DRE =
-          dyn_cast<DeclRefExpr>(stripCasts(DC->getParentASTContext(), E)))
-    if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl()))
-      if (isTrackedVar(VD, DC))
+          dyn_cast<DeclRefExpr>(E)) {
+    llvm::errs() << "findVar: found decl ref\n";
+    DRE->dump();
+    if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+      llvm::errs() << "findVar: found var decl\n";
+      VD->dump();
+      if (isTrackedVar(VD, DC)) {
+        llvm::errs() << "value is tracked\n";
         return FindVarResult(VD, DRE);
+      } else {
+        llvm::errs() << "value not tracked\n";
+      }
+    } else {
+      llvm::errs() << "findVar: not found var decl\n";
+      DRE->getDecl()->dump();
+    }
+  }
   return FindVarResult(nullptr, nullptr);
 }
 
@@ -328,6 +348,16 @@ static const DeclRefExpr *getSelfInitExpr(const VarDecl *VD) {
   return nullptr;
 }
 
+static bool recordHasInit(const RecordDecl *RD) {
+  if (const auto *CRD = dyn_cast<CXXRecordDecl>(RD)) {
+    if (CRD->hasDefaultConstructor()) return true;
+    for (auto *FD : RD->fields()) {
+      if (FD->hasInClassInitializer()) return true;
+    }
+  }
+  return false;
+}
+
 void ClassifyRefs::classify(const Expr *E, Class C) {
   // The result of a ?: could also be an lvalue.
   E = E->IgnoreParens();
@@ -348,10 +378,40 @@ void ClassifyRefs::classify(const Expr *E, Class C) {
   }
 
   if (const auto *ME = dyn_cast<MemberExpr>(E)) {
-    if (const auto *VD = dyn_cast<VarDecl>(ME->getMemberDecl())) {
-      if (!VD->isStaticDataMember())
-        classify(ME->getBase(), C);
+    // if (const auto *VD = dyn_cast<VarDecl>(ME->getMemberDecl())) {
+    //   if (!VD->isStaticDataMember())
+    //     classify(ME->getBase(), C);
+
+    llvm::errs() << "Found member expr\n";
+    ME->dump();
+    const auto *Base = E;
+    while (const auto *ME = dyn_cast<MemberExpr>(Base)) {
+      if (!isa<FieldDecl>(ME->getMemberDecl())) {
+        llvm::errs() << "not a field decl\n";
+        ME->getMemberDecl()->dump();
+        return;
+      }
+      Base = ME->getBase();
     }
+    llvm::errs() << "found member field decl with base\n";
+    Base->dump();
+    if (const auto *DRE = dyn_cast<DeclRefExpr>(Base)) {
+      llvm::errs() << "Base is a DeclRefExpr\n";
+      if (const auto *RD = dyn_cast<RecordDecl>(DRE->getDecl())) {
+        llvm::errs() << "Base is ref to a RecordDecl\n";
+        if (!recordHasInit(RD)) {
+          llvm::errs() << "Base is not auto initialized\n";
+          classify(Base, C);
+        }
+      }
+    }
+    return;
+  }
+
+  if (const auto *ASE = dyn_cast<ArraySubscriptExpr>(E)) {
+    llvm::errs() << "Found array subscript expr\n";
+    ASE->getBase()->IgnoreCasts()->dump();
+    classify(ASE->getBase()->IgnoreCasts(), C);
     return;
   }
 
@@ -373,6 +433,11 @@ void ClassifyRefs::classify(const Expr *E, Class C) {
   if (const DeclRefExpr *DRE = Var.getDeclRefExpr()) {
     auto &Class = Classification[DRE];
     Class = std::max(Class, C);
+    llvm::errs() << "ClassifyRefs::classify as " << Class << "\n";
+    DRE->dump();
+  } else {
+    llvm::errs() << "ClassifyRefs::classify couldn't find var\n";
+    E->dump();
   }
 }
 
@@ -380,8 +445,11 @@ void ClassifyRefs::VisitDeclStmt(const DeclStmt *DS) {
   for (auto *DI : DS->decls()) {
     auto *VD = dyn_cast<VarDecl>(DI);
     if (VD && isTrackedVar(VD))
-      if (const DeclRefExpr *DRE = getSelfInitExpr(VD))
+      if (const DeclRefExpr *DRE = getSelfInitExpr(VD)) {
         Classification[DRE] = SelfInit;
+        llvm::errs() << "ClassifyRefs::VisitDeclStmt classify as self-init\n";
+        DRE->dump();
+      }
   }
 }
 
@@ -451,8 +519,12 @@ void ClassifyRefs::VisitCallExpr(const CallExpr *CE) {
 }
 
 void ClassifyRefs::VisitCastExpr(const CastExpr *CE) {
-  if (CE->getCastKind() == CK_LValueToRValue)
+  llvm::errs() << " ClassifyRefs::VisitCastExpr\n";
+  CE->dump();
+  if (CE->getCastKind() == CK_LValueToRValue) {
+    llvm::errs() << "CK_LValueToRValue cast\n";
     classify(CE->getSubExpr(), Use);
+  }
   else if (const auto *CSE = dyn_cast<CStyleCastExpr>(CE)) {
     if (CSE->getType()->isVoidType()) {
       // Squelch any detected load of an uninitialized value if
@@ -744,6 +816,8 @@ void TransferFunctions::VisitCallExpr(const CallExpr *ce) {
 }
 
 void TransferFunctions::VisitDeclRefExpr(const DeclRefExpr *dr) {
+  llvm::errs() << "TransferFunctions::VisitDeclRefExpr with classification " << classification.get(dr) << "\n";
+  dr->dump();
   switch (classification.get(dr)) {
   case ClassifyRefs::Ignore:
     break;
@@ -766,16 +840,25 @@ void TransferFunctions::VisitDeclRefExpr(const DeclRefExpr *dr) {
 }
 
 void TransferFunctions::VisitBinaryOperator(const BinaryOperator *BO) {
+  llvm::errs() << "TransferFunctions::VisitBinaryOperator\n";
+  BO->dump();
   if (BO->getOpcode() == BO_Assign) {
     FindVarResult Var = findVar(BO->getLHS());
-    if (const VarDecl *VD = Var.getDecl())
+    if (const VarDecl *VD = Var.getDecl()) {
+      llvm::errs() << "found var\n";
+      VD->dump();
       vals[VD] = Initialized;
+    } else {
+      llvm::errs() << "not found var\n";
+    }
   }
 }
 
 void TransferFunctions::VisitDeclStmt(const DeclStmt *DS) {
   for (const Decl *DI : DS->decls()) {
     const auto *VD = dyn_cast<VarDecl>(DI);
+    llvm::errs() << "TransferFunctions::VisitDeclStmt\n";
+    VD->dump();
     if (VD && isTrackedVar(VD)) {
       if (getSelfInitExpr(VD)) {
         // If the initializer consists solely of a reference to itself, we
@@ -788,9 +871,11 @@ void TransferFunctions::VisitDeclStmt(const DeclStmt *DS) {
         // clients can detect this pattern and adjust their reporting
         // appropriately, but we need to continue to analyze subsequent uses
         // of the variable.
+        llvm::errs() << "selfinit (uninitialized)\n";
         vals[VD] = Uninitialized;
       } else if (VD->getInit()) {
         // Treat the new variable as initialized.
+        llvm::errs() << "initialized\n";
         vals[VD] = Initialized;
       } else {
         // No initializer: the variable is now uninitialized. This matters
@@ -803,6 +888,7 @@ void TransferFunctions::VisitDeclStmt(const DeclStmt *DS) {
         // FIXME: Mark the variable as uninitialized whenever its scope is
         // left, since its scope could be re-entered by a jump over the
         // declaration.
+        llvm::errs() << "uninitialized\n";
         vals[VD] = Uninitialized;
       }
     }
@@ -938,7 +1024,7 @@ void clang::runUninitializedVariablesAnalysis(
     vec[j] = Uninitialized;
   }
 
-  // Proceed with the workist.
+  // Proceed with the worklist.
   ForwardDataflowWorklist worklist(cfg, ac);
   llvm::BitVector previouslyVisited(cfg.getNumBlockIDs());
   worklist.enqueueSuccessors(&cfg.getEntry());

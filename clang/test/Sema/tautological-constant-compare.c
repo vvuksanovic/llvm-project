@@ -16,6 +16,7 @@
 #endif
 
 int value(void);
+void init(void *);
 
 #define macro(val) val
 
@@ -548,14 +549,15 @@ int main(void)
       return 0;
 
   // We only warn on out-of-range bitfields and expressions with limited range
-  // under -Wtantological-in-range-compare, not under -Wtype-limits, because
-  // the warning is not based on the type alone.
+  // under -Wtautological-constant-in-range-compare, not under -Wtype-limits,
+  // because the warning is not based on the type alone.
   struct A {
     int a : 3;
     unsigned b : 3;
     long c : 3;
     unsigned long d : 3;
   } a;
+  init(&a);
   if (a.a < 3) {}
   if (a.a < 4) {} // #bitfield1
   if (a.b < 7) {}

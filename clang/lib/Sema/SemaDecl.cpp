@@ -13130,8 +13130,14 @@ namespace {
       } else if (cast<VarDecl>(OrigDecl)->isStaticLocal()) {
         diag = diag::warn_static_self_reference_in_init;
       } else if (isa<TranslationUnitDecl>(OrigDecl->getDeclContext()) ||
-                 isa<NamespaceDecl>(OrigDecl->getDeclContext()) ||
-                 DRE->getDecl()->getType()->isRecordType()) {
+                 isa<NamespaceDecl>(OrigDecl->getDeclContext()) // ||
+                //  (DRE->getDecl()->getType()->isRecordType()
+                 
+              // )
+            ) {
+        llvm::errs() << "HandleDeclRefExpr self init\n";
+        DRE->dump();
+        DRE->getDecl()->dump();
         diag = diag::warn_uninit_self_reference_in_init;
       } else {
         // Local variables will be handled by the CFG analysis.

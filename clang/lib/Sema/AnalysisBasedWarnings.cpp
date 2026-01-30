@@ -1177,6 +1177,9 @@ static bool DiagnoseUninitializedUse(Sema &S, const VarDecl *VD,
       ContainsReference CR(S.Context, DRE);
       CR.Visit(Initializer);
       if (CR.doesContainReference()) {
+        llvm::errs() << "DiagnoseUninitializedUse self init\n";
+        DRE->dump();
+        DRE->getDecl()->dump();;
         S.Diag(DRE->getBeginLoc(), diag::warn_uninit_self_reference_in_init)
             << VD->getDeclName() << VD->getLocation() << DRE->getSourceRange();
         return !S.getDiagnostics().isLastDiagnosticIgnored();
